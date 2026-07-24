@@ -35,16 +35,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return undefined;
   }
 
-  if (message?.type === "ANNOTATE_CREATE_SHARE") {
-    createShare(message, sender)
-      .then((share) => sendResponse({ ok: true, share }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "ANNOTATE_FETCH_SHARE") {
-    fetchShare(message.shareId)
-      .then((share) => sendResponse({ ok: true, share }))
+  if (message?.type === "ANNOTATE_CAPTURE_AND_CREATE_SHARE") {
+    captureAndCreateShare(message, sender)
+      .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -52,21 +45,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return undefined;
 });
 
-chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-  if (message?.type !== "ANNOTATE_PING" || !isAllowedWebAppUrl(sender.url)) return false;
-  sendResponse({
-    ok: true,
-    installed: true,
-    version: chrome.runtime.getManifest().version,
-  });
-  return false;
-});
-
-async function createShare(message, sender) {
+async function captureAndCreateShare(message, sender) {
   if (!sender.tab?.id || !sender.tab.active) throw new Error("The annotated tab is not active");
   const targetUrl = normaliseTargetUrl(message.targetUrl);
-  const xpath = boundedString(message.xpath, 4096, "XPath");
-  const comment = boundedString(message.comment, 240, "Comment");
 
   const screenshotDataUrl = await chrome.tabs.captureVisibleTab(sender.tab.windowId, {
     format: "jpeg",
@@ -75,46 +56,33 @@ async function createShare(message, sender) {
   const screenshot = await (await fetch(screenshotDataUrl)).blob();
   const form = new FormData();
   form.set("targetUrl", targetUrl);
-  form.set("xpath", xpath);
-  form.set("comment", comment);
-  form.set("screenshot", screenshot, "annotation.jpg");
-
-  const response = await fetch(config.apiBaseUrl, {
-    method: "POST",
-    headers: { "X-Annotate-Client": "extension-v1" },
-    body: form,
-  });
-  const payload = await readJson(response);
-  if (!response.ok) throw new Error(payload?.error?.message || "Could not create the share link");
-  if (!isShareId(payload.id)) throw new Error("The share service returned an invalid ID");
-
-  return {
-    shareId: payload.id,
-    shareUrl: payload.shareUrl || sharePageUrl(config.webAppOrigin, payload.id),
-    screenshotUrl: payload.screenshotUrl,
-    sharedAt: new Date().toISOString(),
-  };
-}
-
-async function fetchShare(shareId) {
-  if (!isShareId(shareId)) throw new Error("Invalid share link");
-  const response = await fetch(`${config.apiBaseUrl}/${encodeURIComponent(shareId)}`);
-  const payload = await readJson(response);
-  if (!response.ok) throw new Error(payload?.error?.message || "Share not found");
-
-  return {
-    ...payload,
-    shareId,
-    shareUrl: sharePageUrl(config.webAppOrigin, shareId),
-  };
-}
-
-function isAllowedWebAppUrl(value) {
   try {
-    const origin = new URL(value).origin;
-    return config.allowedWebAppOrigins.includes(origin);
-  } catch (_error) {
-    return false;
+    form.set("screenshot", screenshot, "annotate-screenshot.jpg");
+    const response = await fetch(config.apiBaseUrl, {
+      method: "POST",
+      headers: { "X-Annotate-Client": "extension-v1" },
+      body: form,
+    });
+    const payload = await readJson(response);
+    if (!response.ok) throw new Error(payload?.error?.message || "Could not create the share link");
+    if (!isShareId(payload.id)) throw new Error("The share service returned an invalid ID");
+
+    return {
+      ok: true,
+      screenshotDataUrl,
+      share: {
+        shareId: payload.id,
+        shareUrl: payload.shareUrl || sharePageUrl(config.webAppOrigin, payload.id),
+        screenshotUrl: payload.screenshotUrl,
+        sharedAt: new Date().toISOString(),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      screenshotDataUrl,
+      error: error?.message || "Could not create the share link",
+    };
   }
 }
 
@@ -124,12 +92,6 @@ function normaliseTargetUrl(value) {
     throw new Error("Invalid target URL");
   }
   return url.toString();
-}
-
-function boundedString(value, maxLength, label) {
-  const text = String(value || "").trim();
-  if (!text || text.length > maxLength) throw new Error(`${label} is invalid`);
-  return text;
 }
 
 async function readJson(response) {

@@ -15,19 +15,6 @@
     return url.toString();
   }
 
-  function readShareId(value) {
-    const url = new URL(value);
-    const id = url.searchParams.get(SHARE_ID_PARAM) || "";
-    return isShareId(id) ? id : null;
-  }
-
-  function targetUrl(value, shareId) {
-    if (!isShareId(shareId)) throw new TypeError("Invalid share ID");
-    const url = new URL(pageUrl(value));
-    url.searchParams.set(SHARE_ID_PARAM, shareId);
-    return url.toString();
-  }
-
   function sharePageUrl(origin, shareId) {
     if (!isShareId(shareId)) throw new TypeError("Invalid share ID");
     const url = new URL(`/s/${shareId}`, ensureOrigin(origin));
@@ -42,23 +29,6 @@
     const url = new URL(value);
     if (!/^https?:$/.test(url.protocol)) throw new TypeError("Invalid web app origin");
     return url.origin;
-  }
-
-  function annotationFingerprint(annotation) {
-    return `${annotation.xpath}\n${annotation.content}`;
-  }
-
-  function dedupeAnnotations(annotations) {
-    const seenShareIds = new Set();
-    const seenFingerprints = new Set();
-    return annotations.filter((annotation) => {
-      const fingerprint = annotationFingerprint(annotation);
-      if (annotation.shareId && seenShareIds.has(annotation.shareId)) return false;
-      if (seenFingerprints.has(fingerprint)) return false;
-      if (annotation.shareId) seenShareIds.add(annotation.shareId);
-      seenFingerprints.add(fingerprint);
-      return true;
-    });
   }
 
   function xpathLiteral(value) {
@@ -94,14 +64,10 @@
     MAX_CONTENT_LENGTH,
     SHARE_ID_PARAM,
     SHARE_ID_PATTERN,
-    annotationFingerprint,
-    dedupeAnnotations,
     ensureOrigin,
     isShareId,
     pageUrl,
-    readShareId,
     sharePageUrl,
-    targetUrl,
     xpathForElement,
     xpathLiteral,
   };

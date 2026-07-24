@@ -14,28 +14,30 @@
 
 The Manifest V3 extension is functional and has been iteratively styled from user feedback. There is no build step. The last verification passed all 5 Node tests and JavaScript syntax checks.
 
-The latest completed change keeps the selected DOM element outlined for the full lifetime of the new-annotation composer, including while scrolling. The outline is removed only after save or cancel.
+The latest completed change adds a persisted 12-colour annotation palette to the compact toolbar and automatically switches note/icon foreground contrast for light colours.
 
 ## Established product behavior
 
 - Clicking the Chrome extension icon toggles the in-page UI directly; there is no popup.
-- The bottom-right launcher and expanded panel slide in/out from the right. The launcher is a compact cobalt speech-bubble `A` plus a ghost close button.
-- Active page annotations are outlined and shown as white cards beside their DOM target. Comments resolving to the same element stack vertically.
+- The bottom-right toolbar slides in/out from the right and contains the colour-aware `A`, viewport screenshot, current-colour circle, annotation plus, and close-mode controls.
+- The colour circle opens a top widget matching the screenshot preview styling. The active swatch has a dark border, and changing it updates all note backgrounds, target/saved outlines, and the `A` background immediately.
+- Active page annotations are outlined and shown as cobalt note boxes beside their DOM target. Comments resolving to the same element stack vertically.
 - Page comments reveal first-to-last with a 50ms stagger and dismiss last-to-first before the host is hidden.
-- The expanded panel title is the exact URL without the protocol and truncates with an ellipsis.
-- The list has scroll-aware white fades, neutral canvas cards, cobalt number bubbles, and compact ghost Copy/Delete actions.
-- Selecting “Add annotation” enters DOM-selection mode; the button becomes destructive red with an × and reads “Cancel selection.” After an element is selected, it immediately returns to the cobalt Add state.
+- Each page note contains compact Share/Delete ghost controls on its right edge.
+- The plus control toggles DOM-selection mode and uses a dark active state with a white plus. After an element is selected, it immediately returns to its inactive state.
 - The inline composer occupies the exact future annotation position. If comments already resolve to that DOM element, it appears directly beneath their stack.
 - The composer is one unified white surface, fades in/out, auto-grows from 126px to 240px, and has no textarea border or focus ring. A 38px ghost × is inset 8px at bottom-left; a 38px cobalt up-arrow Save button is inset 8px at bottom-right.
 - Escape also cancels the composer.
-- Shared-link import, exact-URL local storage, stale annotations, and SPA route behavior are documented in `README.md` and implemented in `lib.js`/`content.js`.
+- Note Share captures only that note and highlight; viewport capture keeps all currently visible notes. Both upload immediately and open the fixed preview with Share, Download, Copy Link, and close controls.
+- Share pages always remain in the web app. Extension detection, original-page redirects, share import, and the missing-import rail have been removed.
+- Exact-URL local storage, unresolved annotations, and SPA route behavior are documented in `README.md` and implemented in `lib.js`/`content.js`.
 
 ## Visual direction
 
 - Reference aesthetic: clean white surfaces, cobalt primary (`#405cf5`), restrained shadows, high-radius cards, neutral greys.
 - The user strongly prefers incremental visual adjustments and compact controls.
-- Neutral palette requested for list UI: ink black, snow, canvas, fog, pebble, graphite, slate, steel, and ash; these are CSS variables in `content.js`.
-- Do not reintroduce a popup, protocol in the panel title, launcher text/count, chevrons, colored composer accent bars, composer headings, or textarea rings.
+- The neutral palette uses ink black, snow, canvas, fog, pebble, graphite, slate, steel, and ash; these are CSS variables in `content.js`.
+- Do not reintroduce a popup, annotation-list panel, launcher text/count, chevrons, colored composer accent bars, composer headings, or textarea rings.
 
 ## Verification
 

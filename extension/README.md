@@ -1,6 +1,6 @@
 # annotate
 
-A local-first Chrome extension for attaching short comments to elements on a webpage and sharing an individual annotation through the Annotate web app.
+A local-first Chrome extension for attaching short comments to webpage elements and sharing annotated screenshots through the Annotate web app.
 
 ## Install locally
 
@@ -13,12 +13,16 @@ A local-first Chrome extension for attaching short comments to elements on a web
 
 - Every page is keyed in `chrome.storage.local` by its full URL, including ordinary query parameters and the hash.
 - A saved annotation contains an XPath, short text content (up to 240 characters), an ID, and its creation time.
-- The first **Copy link** captures the visible viewport with the target's cobalt border and the shared comment, uploads it through the web app, and stores the immutable share URL locally. Other annotations and extension controls are excluded from the screenshot. Later copies reuse that URL.
-- Opening a web share with the extension installed redirects to the original page with an `annotateShare` ID. The extension imports the record, removes the parameter, and displays the annotation.
-- If an imported XPath does not resolve after a short SPA grace period, its screenshot and comment appear in the stacked left-side missing-element rail. Local notes without screenshots remain in the panel's **Element not found** group.
+- The bottom-right toolbar exposes viewport capture, annotation colour, annotation selection, and close-mode controls directly; there is no annotation-list panel.
+- The colour control opens a 12-colour palette. The choice is stored globally for the extension and updates every note, target outline, saved-element highlight, and the toolbar `A`; light colours automatically use dark foreground controls and text.
+- Each visible note contains ghost Share and Delete buttons. The first Share captures only that note and its highlighted element, uploads the JPEG, stores the immutable link locally, and opens the screenshot preview. Later shares reuse the same screenshot and link.
+- The toolbar screenshot button captures the current viewport with all visible notes. Extension controls fade out before capture, while offscreen and unresolved annotations remain excluded.
+- The screenshot preview provides Share, Download, and Copy Link controls. Viewport previews are temporary, but their uploaded links remain durable.
+- Public share links always display the screenshot in the web app, even when the extension is installed. Shared annotations are no longer imported back onto the original page.
+- Annotations whose XPath no longer resolves remain in local storage and reappear if their target becomes available again.
 - Single-page-app URL changes are detected, so each route keeps its own exact-URL annotation set without a full reload.
 - In active mode, every resolved element is outlined and its comments are shown beside it. Multiple comments on one element stack vertically.
-- The bottom-right control widget remains fixed to the browser viewport. Element outlines, saved comment stacks, and the new-annotation composer are document-anchored and stay attached to their element as it scrolls.
+- The bottom toolbar and screenshot preview remain fixed to the browser viewport. Element outlines, saved comment stacks, and the new-annotation composer are document-anchored and stay attached to their element as it scrolls.
 
 ## Development
 
@@ -30,6 +34,6 @@ npm test
 
 ## Web app configuration
 
-Update `config.js` with the deployed web origin and API URL, and replace the matching placeholder in `manifest.json` before publishing. For unpacked local development, add the local extension ID to `web/.dev.vars` and set `config.js` to the Wrangler Pages development origin.
+Update `config.js` with the deployed web origin and API URL before publishing. For unpacked local development, add the local extension origin to `web/.dev.vars` and set `config.js` to the Wrangler Pages development origin.
 
 The extension never receives R2 credentials. Its background worker captures the active tab and uploads a validated JPEG multipart request to the Cloudflare Pages Function.

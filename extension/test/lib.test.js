@@ -2,12 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   MAX_CONTENT_LENGTH,
-  dedupeAnnotations,
   isShareId,
   pageUrl,
-  readShareId,
   sharePageUrl,
-  targetUrl,
   xpathForElement,
   xpathLiteral,
 } = require("../lib.js");
@@ -21,27 +18,10 @@ test("pageUrl removes only annotateShare and preserves path, search, and hash", 
   );
 });
 
-test("target URL round trips a valid share ID", () => {
-  const result = targetUrl("https://example.com/page?view=wide#hero", SHARE_ID);
-  assert.equal(readShareId(result), SHARE_ID);
-  assert.equal(new URL(result).hash, "#hero");
-  assert.equal(new URL(result).searchParams.get("view"), "wide");
-});
-
 test("share IDs and share-page URLs are validated", () => {
   assert.equal(isShareId(SHARE_ID), true);
-  assert.equal(readShareId("https://example.com/?annotateShare=too-short"), null);
+  assert.equal(isShareId("too-short"), false);
   assert.equal(sharePageUrl("https://annotate.example/path", SHARE_ID), `https://annotate.example/s/${SHARE_ID}`);
-  assert.throws(() => targetUrl("https://example.com", "invalid"), /Invalid share ID/);
-});
-
-test("dedupeAnnotations checks share ID first and fingerprint second", () => {
-  assert.equal(dedupeAnnotations([
-    { xpath: "/p[1]", content: "Same", id: "one", shareId: SHARE_ID },
-    { xpath: "/p[2]", content: "Different", id: "two", shareId: SHARE_ID },
-    { xpath: "/p[1]", content: "Same", id: "three" },
-    { xpath: "/p[1]", content: "Different", id: "three" },
-  ]).length, 2);
 });
 
 test("content length remains 240 characters", () => {
