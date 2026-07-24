@@ -1,6 +1,4 @@
 export const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
-export const MAX_COMMENT_LENGTH = 240;
-export const MAX_XPATH_LENGTH = 4096;
 export const MAX_URL_LENGTH = 8192;
 export const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
 const MAX_REQUEST_BYTES = MAX_SCREENSHOT_BYTES + 256 * 1024;
@@ -11,7 +9,7 @@ export interface Env {
   ALLOWED_UPLOAD_ORIGINS?: string;
 }
 
-export interface StoredShareRecord {
+export interface StoredShareRecordV1 {
   version: 1;
   id: string;
   targetUrl: string;
@@ -21,7 +19,17 @@ export interface StoredShareRecord {
   screenshotKey: string;
 }
 
-export interface PublicShareRecord {
+export interface StoredShareRecordV2 {
+  version: 2;
+  id: string;
+  targetUrl: string;
+  createdAt: string;
+  screenshotKey: string;
+}
+
+export type StoredShareRecord = StoredShareRecordV1 | StoredShareRecordV2;
+
+export interface PublicShareRecordV1 {
   version: 1;
   id: string;
   targetUrl: string;
@@ -30,6 +38,16 @@ export interface PublicShareRecord {
   createdAt: string;
   screenshotUrl: string;
 }
+
+export interface PublicShareRecordV2 {
+  version: 2;
+  id: string;
+  targetUrl: string;
+  createdAt: string;
+  screenshotUrl: string;
+}
+
+export type PublicShareRecord = PublicShareRecordV1 | PublicShareRecordV2;
 
 interface ScreenshotFile {
   type: string;
@@ -62,22 +80,18 @@ export async function createShare(request: Request, env: Env): Promise<Response>
   }
 
   const targetUrl = textField(form, "targetUrl");
-  const xpath = textField(form, "xpath");
-  const comment = textField(form, "comment").trim();
   const screenshot = form.get("screenshot");
-  const validationError = validateShareInput({ targetUrl, xpath, comment, screenshot });
+  const validationError = validateShareInput({ targetUrl, screenshot });
   if (validationError) return withCors(apiError(validationError.code, validationError.message, 400), origin);
 
   const id = createShareId();
   const screenshotKey = screenshotKeyFor(id);
   const metadataKey = metadataKeyFor(id);
   const createdAt = new Date().toISOString();
-  const record: StoredShareRecord = {
-    version: 1,
+  const record: StoredShareRecordV2 = {
+    version: 2,
     id,
     targetUrl: new URL(targetUrl).toString(),
-    xpath,
-    comment,
     createdAt,
     screenshotKey,
   };
@@ -120,24 +134,34 @@ export async function getShare(request: Request, env: Env, id: string): Promise<
   } catch (_error) {
     return apiError("storage_error", "The share service is temporarily unavailable.", 503);
   }
-  if (!object) return apiError("not_found", "This shared annotation is unavailable.", 404);
+  if (!object) return apiError("not_found", "This shared screenshot is unavailable.", 404);
 
   try {
     const stored = await object.json<StoredShareRecord>();
-    if (stored.version !== 1 || stored.id !== id) throw new Error("Invalid metadata");
+    if ((stored.version !== 1 && stored.version !== 2) || stored.id !== id) {
+      throw new Error("Invalid metadata");
+    }
     const appOrigin = configuredAppOrigin(request, env);
-    const response: PublicShareRecord = {
-      version: 1,
+    const sharedFields = {
       id: stored.id,
       targetUrl: stored.targetUrl,
-      xpath: stored.xpath,
-      comment: stored.comment,
       createdAt: stored.createdAt,
       screenshotUrl: `${appOrigin}/api/shares/${id}/image`,
-    };
+    } as const;
+    const response: PublicShareRecord = stored.version === 1
+      ? {
+          version: 1,
+          ...sharedFields,
+          xpath: stored.xpath,
+          comment: stored.comment,
+        }
+      : {
+          version: 2,
+          ...sharedFields,
+        };
     return publicJson(response);
   } catch (_error) {
-    return apiError("invalid_record", "This shared annotation is unavailable.", 502);
+    return apiError("invalid_record", "This shared screenshot is unavailable.", 502);
   }
 }
 
@@ -188,8 +212,6 @@ export function screenshotKeyFor(id: string): string {
 
 function validateShareInput(input: {
   targetUrl: string;
-  xpath: string;
-  comment: string;
   screenshot: FormDataEntryValue | null;
 }): { code: string; message: string } | null {
   if (!input.targetUrl || input.targetUrl.length > MAX_URL_LENGTH) {
@@ -200,12 +222,6 @@ function validateShareInput(input: {
     if (!/^https?:$/.test(url.protocol)) throw new Error("Invalid protocol");
   } catch (_error) {
     return { code: "invalid_target_url", message: "The target URL is invalid." };
-  }
-  if (!input.xpath || input.xpath.length > MAX_XPATH_LENGTH) {
-    return { code: "invalid_xpath", message: "The annotation target is invalid." };
-  }
-  if (!input.comment || input.comment.length > MAX_COMMENT_LENGTH) {
-    return { code: "invalid_comment", message: "The comment must contain between 1 and 240 characters." };
   }
   if (!isScreenshotFile(input.screenshot)) {
     return { code: "invalid_screenshot", message: "A JPEG screenshot is required." };

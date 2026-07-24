@@ -142,13 +142,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .share-intro h1 { margin: 19px 0 14px; font-size: clamp(41px, 5vw, 62px); line-height: 1.02; letter-spacing: -.055em; }
 .share-intro h1 span { color: var(--blue); }
 .share-intro p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
-.share-screenshot { min-height: 300px; margin: 0; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(145deg, var(--blue-pale), var(--pink-pale)); box-shadow: 0 28px 65px rgba(31,47,90,.13); }
+.share-screenshot { position: relative; min-height: 300px; margin: 0; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(145deg, var(--blue-pale), var(--pink-pale)); box-shadow: 0 28px 65px rgba(31,47,90,.13); }
 .share-screenshot img { display: block; width: 100%; height: auto; }
 .share-screenshot.is-broken p { color: #737c8f; font-size: 13px; }
-.shared-note { width: min(720px, calc(100% - 48px)); margin: -26px auto 0; position: relative; z-index: 1; padding: 22px; display: grid; grid-template-columns: 42px 1fr; gap: 16px; border: 1px solid rgba(17,26,46,.08); border-radius: 17px; background: #fff; box-shadow: 0 17px 42px rgba(17,26,46,.14); }
-.note-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px 12px 12px 4px; background: var(--blue); color: #fff; font-size: 15px; font-weight: 850; }
-.note-label { color: #8a92a2; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.shared-note p { margin: 6px 0 0; color: #222a3d; font-size: 15px; font-weight: 650; line-height: 1.55; word-break: break-word; }
+.share-screenshot-controls { position: absolute; z-index: 2; top: 16px; right: 16px; display: flex; gap: 8px; }
+.share-screenshot-button { width: 42px; height: 42px; padding: 0; border: 1px solid rgba(17,26,46,.10); border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.90); color: var(--navy); cursor: pointer; box-shadow: 0 8px 22px rgba(17,26,46,.16); backdrop-filter: blur(10px); transition: transform .16s ease, background .16s ease, box-shadow .16s ease; }
+.share-screenshot-button:hover:not(:disabled) { transform: translateY(-1px); background: #fff; box-shadow: 0 11px 27px rgba(17,26,46,.20); }
+.share-screenshot-button:focus-visible { outline: 3px solid rgba(64,92,245,.30); outline-offset: 2px; }
+.share-screenshot-button:disabled { opacity: .55; cursor: wait; }
+.share-screenshot-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .share-actions { margin-top: 45px; display: flex; justify-content: center; gap: 11px; }
 .share-footer { height: 82px; display: grid; place-items: center; border-top: 1px solid var(--line); color: #969dab; font-size: 10px; }
 .share-error { min-height: calc(100vh - 164px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
@@ -215,9 +217,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .share-view { padding-top: 58px; }
   .share-intro h1 { font-size: 40px; }
   .share-screenshot { min-height: 190px; border-radius: 15px; }
-  .shared-note { width: calc(100% - 22px); margin-top: -16px; padding: 16px; grid-template-columns: 34px 1fr; }
-  .note-mark { width: 34px; height: 34px; border-radius: 10px 10px 10px 3px; }
-  .shared-note p { font-size: 13px; }
+  .share-screenshot-controls { top: 10px; right: 10px; gap: 6px; }
+  .share-screenshot-button { width: 38px; height: 38px; }
   .share-actions { flex-direction: column; }
   .share-actions .button { width: 100%; }
 }

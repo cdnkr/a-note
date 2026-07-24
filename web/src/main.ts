@@ -1,11 +1,9 @@
 import "./styles.css";
-import { CHROME_STORE_URL, EXTENSION_ID } from "./config";
+import { CHROME_STORE_URL } from "./config";
 import {
   fetchShareRecord,
-  pingExtension,
   ShareRequestError,
   shareIdFromPath,
-  targetUrlWithShare,
   type ShareRecord,
 } from "./share-client";
 
@@ -27,6 +25,14 @@ function arrowIcon(): string {
   return `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"/></svg>`;
 }
 
+function shareIcon(): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4m-7.6 6.8 7.6 4.4"/></svg>`;
+}
+
+function downloadIcon(): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg>`;
+}
+
 function renderLandingPage(root: HTMLElement): void {
   document.title = "Annotate — Feedback, in context";
   root.innerHTML = `
@@ -43,7 +49,7 @@ function renderLandingPage(root: HTMLElement): void {
       <section class="hero shell">
         <span class="eyebrow"><i></i> Feedback, in context</span>
         <h1>Leave feedback exactly<br>where it belongs.</h1>
-        <p>Highlight any element, add a comment, and share the full context in one simple link.</p>
+        <p>Highlight any element, add a comment, and share the visual context in one simple link.</p>
         <div class="hero-actions">
           <a class="button" href="${escapeAttribute(CHROME_STORE_URL)}">Get the extension ${arrowIcon()}</a>
           <a class="text-link" href="#how-it-works">See how it works <span>↓</span></a>
@@ -93,7 +99,7 @@ function renderLandingPage(root: HTMLElement): void {
             <span class="feature-number">03</span>
             <div class="mini-link"><i></i><i></i><span>annotate.example/s/...</span></div>
             <h3>Share one link</h3>
-            <p>Send a durable link with the page, screenshot, target, and comment together.</p>
+            <p>Send a durable screenshot link that keeps the visual context intact.</p>
           </article>
         </div>
       </section>
@@ -105,7 +111,7 @@ function renderLandingPage(root: HTMLElement): void {
         </div>
         <div class="dark-copy">
           <p>Make reviews faster without introducing another heavy collaboration system.</p>
-          <ul><li><span>✓</span> Local-first annotations</li><li><span>✓</span> Visual share fallback</li><li><span>✓</span> No account required</li></ul>
+          <ul><li><span>✓</span> Local-first annotations</li><li><span>✓</span> Screenshot sharing</li><li><span>✓</span> No account required</li></ul>
         </div>
         <div class="dark-demo">
           <div class="dark-browser"><span>annotate</span><i></i><i></i><i></i></div>
@@ -132,7 +138,7 @@ function renderLandingPage(root: HTMLElement): void {
 
 async function renderSharePage(root: HTMLElement): Promise<void> {
   setNoIndex();
-  document.title = "Opening shared annotation — Annotate";
+  document.title = "Opening shared screenshot — Annotate";
   const shareId = shareIdFromPath(location.pathname);
   if (!shareId) {
     renderShareError(root, "That link doesn’t look right.", "Check the URL or ask the sender for a new share link.");
@@ -144,19 +150,12 @@ async function renderSharePage(root: HTMLElement): Promise<void> {
     <main class="share-loading shell" aria-live="polite">
       <span class="loader-mark">A</span>
       <span class="loading-line"></span><span class="loading-line loading-line-short"></span>
-      <p>Opening shared annotation…</p>
+      <p>Opening shared screenshot…</p>
     </main>`;
 
   try {
-    const [record, installed] = await Promise.all([
-      fetchShareRecord(shareId),
-      pingExtension(EXTENSION_ID),
-    ]);
-    if (installed) {
-      location.replace(targetUrlWithShare(record.targetUrl, shareId));
-      return;
-    }
-    renderShareFallback(root, record);
+    const record = await fetchShareRecord(shareId);
+    renderSharedScreenshot(root, record);
   } catch (error) {
     if (error instanceof ShareRequestError && error.status === 404) {
       renderShareError(root, "This share isn’t available.", "It may have been removed, or the link may be incomplete.");
@@ -166,8 +165,8 @@ async function renderSharePage(root: HTMLElement): Promise<void> {
   }
 }
 
-function renderShareFallback(root: HTMLElement, record: ShareRecord): void {
-  document.title = "Shared annotation — Annotate";
+function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
+  document.title = "Shared screenshot — Annotate";
   const source = new URL(record.targetUrl);
   root.replaceChildren();
 
@@ -179,14 +178,14 @@ function renderShareFallback(root: HTMLElement, record: ShareRecord): void {
   main.className = "share-view shell";
   const intro = document.createElement("div");
   intro.className = "share-intro";
-  intro.innerHTML = `<h1>A note on <span></span></h1><p>Install Annotate to open this feedback directly on the original element.</p>`;
+  intro.innerHTML = `<h1>A screenshot from <span></span></h1><p>Shared with Annotate.</p>`;
   intro.querySelector("h1 span")!.textContent = source.hostname;
 
   const screenshot = document.createElement("figure");
   screenshot.className = "share-screenshot";
   const image = document.createElement("img");
   image.src = record.screenshotUrl;
-  image.alt = "Screenshot showing the highlighted element";
+  image.alt = "Shared annotated screenshot";
   image.referrerPolicy = "no-referrer";
   image.addEventListener("error", () => {
     screenshot.classList.add("is-broken");
@@ -195,22 +194,18 @@ function renderShareFallback(root: HTMLElement, record: ShareRecord): void {
     message.textContent = "The screenshot could not be displayed.";
     screenshot.append(message);
   }, { once: true });
-  screenshot.append(image);
-
-  // const note = document.createElement("section");
-  // note.className = "shared-note";
-  // note.setAttribute("aria-label", "Shared comment");
-  // const noteMark = document.createElement("span");
-  // noteMark.className = "note-mark";
-  // noteMark.textContent = "A";
-  // const noteCopy = document.createElement("div");
-  // const noteLabel = document.createElement("span");
-  // noteLabel.className = "note-label";
-  // noteLabel.textContent = "Comment";
-  // const comment = document.createElement("p");
-  // comment.textContent = record.comment;
-  // noteCopy.append(noteLabel, comment);
-  // note.append(noteMark, noteCopy);
+  const screenshotControls = document.createElement("div");
+  screenshotControls.className = "share-screenshot-controls";
+  const shareButton = screenshotIconButton("Share screenshot", shareIcon());
+  const downloadButton = screenshotIconButton("Download screenshot", downloadIcon());
+  shareButton.addEventListener("click", () => void shareScreenshotPage(shareButton));
+  downloadButton.addEventListener("click", () => void downloadSharedScreenshot(
+    record.screenshotUrl,
+    source.hostname,
+    downloadButton,
+  ));
+  screenshotControls.append(shareButton, downloadButton);
+  screenshot.append(image, screenshotControls);
 
   const actions = document.createElement("div");
   actions.className = "share-actions";
@@ -223,7 +218,6 @@ function renderShareFallback(root: HTMLElement, record: ShareRecord): void {
   main.append(
     intro,
     screenshot,
-    // note,
     actions
   );
   root.append(header, main, shareFooter());
@@ -257,6 +251,75 @@ function actionLink(label: string, href: string, className: string): HTMLAnchorE
   link.href = href;
   link.textContent = label;
   return link;
+}
+
+function screenshotIconButton(label: string, icon: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "share-screenshot-button";
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = icon;
+  return button;
+}
+
+async function shareScreenshotPage(button: HTMLButtonElement): Promise<void> {
+  const shareData = {
+    title: document.title,
+    text: "Shared with Annotate",
+    url: location.href,
+  };
+  try {
+    const canShare = typeof navigator.share === "function"
+      && (typeof navigator.canShare !== "function" || navigator.canShare(shareData));
+    if (canShare) {
+      await navigator.share(shareData);
+      return;
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(location.href);
+    showTemporaryButtonStatus(button, "Link copied");
+  } catch (_error) {
+    showTemporaryButtonStatus(button, "Could not copy link");
+  }
+}
+
+async function downloadSharedScreenshot(
+  screenshotUrl: string,
+  hostname: string,
+  button: HTMLButtonElement,
+): Promise<void> {
+  button.disabled = true;
+  try {
+    const response = await fetch(screenshotUrl, { credentials: "same-origin" });
+    if (!response.ok) throw new Error("Screenshot download failed");
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `annotate-${hostname.replace(/[^a-z0-9]+/gi, "-") || "screenshot"}.jpg`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch (_error) {
+    showTemporaryButtonStatus(button, "Download failed");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function showTemporaryButtonStatus(button: HTMLButtonElement, status: string): void {
+  const originalLabel = button.getAttribute("aria-label") || "";
+  button.setAttribute("aria-label", status);
+  button.title = status;
+  window.setTimeout(() => {
+    button.setAttribute("aria-label", originalLabel);
+    button.title = originalLabel;
+  }, 1800);
 }
 
 function setNoIndex(): void {

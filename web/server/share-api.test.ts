@@ -74,15 +74,16 @@ function env(bucket = new MemoryR2()): Env & { SHARES: R2Bucket } {
 function uploadRequest(overrides: {
   origin?: string | null;
   targetUrl?: string;
-  xpath?: string;
-  comment?: string;
   screenshot?: File;
   client?: string;
+  includeLegacyFields?: boolean;
 } = {}): Request {
   const form = new FormData();
   form.set("targetUrl", overrides.targetUrl ?? "https://example.com/page?x=real#hero");
-  form.set("xpath", overrides.xpath ?? "/html[1]/body[1]/main[1]");
-  form.set("comment", overrides.comment ?? "This heading needs more energy.");
+  if (overrides.includeLegacyFields) {
+    form.set("xpath", "/html[1]/body[1]/main[1]");
+    form.set("comment", "This heading needs more energy.");
+  }
   form.set("screenshot", overrides.screenshot ?? new File(["jpeg-bytes"], "annotation.jpg", { type: "image/jpeg" }));
   const headers = new Headers({ "X-Annotate-Client": overrides.client ?? "extension-v1" });
   if (overrides.origin !== null) headers.set("Origin", overrides.origin ?? ALLOWED_ORIGIN);
@@ -90,7 +91,7 @@ function uploadRequest(overrides: {
 }
 
 describe("createShare", () => {
-  it("stores an immutable screenshot and metadata record", async () => {
+  it("stores an immutable screenshot and version 2 metadata record", async () => {
     const bucket = new MemoryR2();
     const response = await createShare(uploadRequest(), env(bucket));
     expect(response.status).toBe(201);
@@ -102,6 +103,12 @@ describe("createShare", () => {
       `shares/${payload.id}/metadata.json`,
       `shares/${payload.id}/screenshot.jpg`,
     ]);
+    const stored = JSON.parse(new TextDecoder().decode(
+      bucket.entries.get(`shares/${payload.id}/metadata.json`)!.bytes,
+    )) as { version: number; targetUrl: string; xpath?: string; comment?: string };
+    expect(stored).toMatchObject({ version: 2, targetUrl: "https://example.com/page?x=real#hero" });
+    expect(stored).not.toHaveProperty("xpath");
+    expect(stored).not.toHaveProperty("comment");
   });
 
   it("rejects missing and disallowed origins", async () => {
@@ -111,12 +118,14 @@ describe("createShare", () => {
 
   it("rejects malformed fields and screenshot types", async () => {
     expect((await createShare(uploadRequest({ targetUrl: "javascript:alert(1)" }), env())).status).toBe(400);
-    expect((await createShare(uploadRequest({ xpath: "" }), env())).status).toBe(400);
-    expect((await createShare(uploadRequest({ comment: " " }), env())).status).toBe(400);
-    expect((await createShare(uploadRequest({ comment: "a".repeat(241) }), env())).status).toBe(400);
     expect((await createShare(uploadRequest({
       screenshot: new File(["png"], "annotation.png", { type: "image/png" }),
     }), env())).status).toBe(400);
+  });
+
+  it("accepts and ignores fields sent by legacy extension clients", async () => {
+    const response = await createShare(uploadRequest({ includeLegacyFields: true }), env());
+    expect(response.status).toBe(201);
   });
 
   it("rejects screenshots larger than 10 MiB", async () => {
@@ -134,7 +143,7 @@ describe("createShare", () => {
 });
 
 describe("share reads", () => {
-  it("returns metadata and its private image through public endpoints", async () => {
+  it("returns version 2 metadata and its private image through public endpoints", async () => {
     const bucket = new MemoryR2();
     const runtimeEnv = env(bucket);
     const created = await createShare(uploadRequest(), runtimeEnv);
@@ -142,12 +151,43 @@ describe("share reads", () => {
 
     const metadata = await getShare(new Request(`https://annotate.example/api/shares/${id}`), runtimeEnv, id);
     expect(metadata.status).toBe(200);
-    await expect(metadata.json()).resolves.toMatchObject({ id, comment: "This heading needs more energy." });
+    await expect(metadata.json()).resolves.toMatchObject({
+      version: 2,
+      id,
+      targetUrl: "https://example.com/page?x=real#hero",
+    });
 
     const image = await getScreenshot(new Request(`https://annotate.example/api/shares/${id}/image`), runtimeEnv, id);
     expect(image.status).toBe(200);
     expect(image.headers.get("Content-Type")).toBe("image/jpeg");
     expect(image.headers.get("Cache-Control")).toContain("immutable");
+  });
+
+  it("continues to read version 1 annotation records", async () => {
+    const bucket = new MemoryR2();
+    const runtimeEnv = env(bucket);
+    const id = "AbCdEfGhIjKlMnOpQrStUv";
+    await bucket.put(`shares/${id}/screenshot.jpg`, new TextEncoder().encode("jpeg").buffer, {
+      httpMetadata: { contentType: "image/jpeg" },
+    });
+    await bucket.put(`shares/${id}/metadata.json`, JSON.stringify({
+      version: 1,
+      id,
+      targetUrl: "https://example.com/legacy",
+      xpath: "/html[1]/body[1]/main[1]",
+      comment: "Legacy note",
+      createdAt: "2026-07-15T00:00:00.000Z",
+      screenshotKey: `shares/${id}/screenshot.jpg`,
+    }));
+
+    const response = await getShare(new Request(`https://annotate.example/api/shares/${id}`), runtimeEnv, id);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      version: 1,
+      id,
+      comment: "Legacy note",
+      xpath: "/html[1]/body[1]/main[1]",
+    });
   });
 
   it("returns deliberate errors for invalid and missing records", async () => {
