@@ -1,6 +1,6 @@
 importScripts("config.js", "lib.js");
 
-const { isShareId, sharePageUrl } = globalThis.AnnotateLib;
+const { isShareId, sharePageUrl, withShareColor } = globalThis.AnnotateLib;
 const config = globalThis.AnnotateConfig;
 
 chrome.action.onClicked.addListener(async (tab) => {
@@ -15,7 +15,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["config.js", "lib.js", "content.js"],
+        files: ["config.js", "lib.js", "layout.js", "content.js"],
       });
       const response = await chrome.tabs.sendMessage(tab.id, { type: "ANNOTATE_TOGGLE_ACTIVE" });
       await updateBadge(tab.id, response?.active);
@@ -72,7 +72,9 @@ async function captureAndCreateShare(message, sender) {
       screenshotDataUrl,
       share: {
         shareId: payload.id,
-        shareUrl: payload.shareUrl || sharePageUrl(config.webAppOrigin, payload.id),
+        shareUrl: payload.shareUrl
+          ? withShareColor(payload.shareUrl, message.colorToken)
+          : sharePageUrl(config.webAppOrigin, payload.id, message.colorToken),
         screenshotUrl: payload.screenshotUrl,
         sharedAt: new Date().toISOString(),
       },

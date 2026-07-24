@@ -3,6 +3,7 @@ import { CHROME_STORE_URL } from "./config";
 import {
   fetchShareRecord,
   ShareRequestError,
+  shareColorFromSearch,
   shareIdFromPath,
   type ShareRecord,
 } from "./share-client";
@@ -12,9 +13,18 @@ if (!app) throw new Error("App root not found");
 
 const shareRoute = location.pathname.startsWith("/s/");
 if (shareRoute) {
+  applyShareColor(location.search);
   void renderSharePage(app);
 } else {
   renderLandingPage(app);
+}
+
+function applyShareColor(search: string): void {
+  const color = shareColorFromSearch(search);
+  document.documentElement.style.setProperty("--blue", color.value);
+  document.documentElement.style.setProperty("--blue-dark", color.darkValue);
+  document.documentElement.style.setProperty("--primary-rgb", color.rgb);
+  document.documentElement.style.setProperty("--primary-foreground", color.foreground);
 }
 
 function brand(): string {
@@ -31,6 +41,14 @@ function shareIcon(): string {
 
 function downloadIcon(): string {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg>`;
+}
+
+function externalLinkIcon(): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+}
+
+function copyIcon(): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`;
 }
 
 function renderLandingPage(root: HTMLElement): void {
@@ -146,7 +164,6 @@ async function renderSharePage(root: HTMLElement): Promise<void> {
   }
 
   root.innerHTML = `
-    <header class="share-header shell">${brand()}<a class="button button-small" href="${escapeAttribute(CHROME_STORE_URL)}">Get the extension ${arrowIcon()}</a></header>
     <main class="share-loading shell" aria-live="polite">
       <span class="loader-mark">A</span>
       <span class="loading-line"></span><span class="loading-line loading-line-short"></span>
@@ -170,16 +187,8 @@ function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
   const source = new URL(record.targetUrl);
   root.replaceChildren();
 
-  const header = document.createElement("header");
-  header.className = "share-header shell";
-  header.innerHTML = `${brand()}<a class="button button-small" href="${escapeAttribute(CHROME_STORE_URL)}">Get the extension ${arrowIcon()}</a>`;
-
   const main = document.createElement("main");
-  main.className = "share-view shell";
-  const intro = document.createElement("div");
-  intro.className = "share-intro";
-  intro.innerHTML = `<h1>A screenshot from <span></span></h1><p>Shared with Annotate.</p>`;
-  intro.querySelector("h1 span")!.textContent = source.hostname;
+  main.className = "share-view";
 
   const screenshot = document.createElement("figure");
   screenshot.className = "share-screenshot";
@@ -194,39 +203,60 @@ function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
     message.textContent = "The screenshot could not be displayed.";
     screenshot.append(message);
   }, { once: true });
-  const screenshotControls = document.createElement("div");
-  screenshotControls.className = "share-screenshot-controls";
-  const shareButton = screenshotIconButton("Share screenshot", shareIcon());
-  const downloadButton = screenshotIconButton("Download screenshot", downloadIcon());
+  screenshot.append(image);
+
+  const actions = document.createElement("div");
+  actions.className = "share-actions";
+  const context = document.createElement("p");
+  context.className = "share-context";
+  context.innerHTML = `
+    <span>Shared with</span>
+    <span class="share-title-mark" aria-hidden="true"><span>A</span></span>
+    <span>annotate</span>
+  `;
+  const iconActions = document.createElement("div");
+  iconActions.className = "share-icon-actions";
+  const shareButton = shareIconButton("Share screenshot", shareIcon());
+  const downloadButton = shareIconButton("Download screenshot", downloadIcon());
+  const sourceLink = shareIconLink(`Go to ${source.hostname}`, record.targetUrl, externalLinkIcon());
   shareButton.addEventListener("click", () => void shareScreenshotPage(shareButton));
   downloadButton.addEventListener("click", () => void downloadSharedScreenshot(
     record.screenshotUrl,
     source.hostname,
     downloadButton,
   ));
-  screenshotControls.append(shareButton, downloadButton);
-  screenshot.append(image, screenshotControls);
+  iconActions.append(shareButton, downloadButton, sourceLink);
 
-  const actions = document.createElement("div");
-  actions.className = "share-actions";
-  const install = actionLink("Get the extension", CHROME_STORE_URL, "button");
-  const sourceLink = actionLink(`Open ${source.hostname}`, record.targetUrl, "button button-secondary");
-  sourceLink.target = "_blank";
-  sourceLink.rel = "noopener noreferrer";
-  actions.append(install, sourceLink);
+  const urlField = document.createElement("div");
+  urlField.className = "share-url-field";
+  const urlInput = document.createElement("input");
+  urlInput.type = "url";
+  urlInput.value = location.href;
+  urlInput.readOnly = true;
+  urlInput.setAttribute("aria-label", "Share page URL");
+  urlInput.addEventListener("focus", () => urlInput.select());
+  const copyButton = document.createElement("button");
+  copyButton.className = "share-copy-button";
+  copyButton.type = "button";
+  copyButton.innerHTML = `${copyIcon()}<span>Copy</span>`;
+  copyButton.addEventListener("click", () => void copyShareUrl(urlInput, copyButton));
+  urlField.append(urlInput, copyButton);
+
+  const install = actionLink("Get the extension", CHROME_STORE_URL, "button share-install-button");
+
+  actions.append(context, iconActions, urlField, install);
 
   main.append(
-    intro,
     screenshot,
     actions
   );
-  root.append(header, main, shareFooter());
+  root.append(main);
 }
 
 function renderShareError(root: HTMLElement, title: string, copy: string): void {
   setNoIndex();
   document.title = `${title} — Annotate`;
-  root.innerHTML = `<header class="share-header shell">${brand()}</header>`;
+  root.replaceChildren();
   const main = document.createElement("main");
   main.className = "share-error shell";
   main.innerHTML = `<span class="error-mark">!</span>`;
@@ -235,14 +265,7 @@ function renderShareError(root: HTMLElement, title: string, copy: string): void 
   const paragraph = document.createElement("p");
   paragraph.textContent = copy;
   main.append(heading, paragraph, actionLink("Back to Annotate", "/", "button"));
-  root.append(main, shareFooter());
-}
-
-function shareFooter(): HTMLElement {
-  const footer = document.createElement("footer");
-  footer.className = "share-footer shell";
-  footer.textContent = "Shared with Annotate";
-  return footer;
+  root.append(main);
 }
 
 function actionLink(label: string, href: string, className: string): HTMLAnchorElement {
@@ -253,14 +276,44 @@ function actionLink(label: string, href: string, className: string): HTMLAnchorE
   return link;
 }
 
-function screenshotIconButton(label: string, icon: string): HTMLButtonElement {
+function shareIconButton(label: string, icon: string): HTMLButtonElement {
   const button = document.createElement("button");
-  button.className = "share-screenshot-button";
+  button.className = "share-icon-button";
   button.type = "button";
   button.title = label;
   button.setAttribute("aria-label", label);
   button.innerHTML = icon;
   return button;
+}
+
+function shareIconLink(label: string, href: string, icon: string): HTMLAnchorElement {
+  const link = document.createElement("a");
+  link.className = "share-icon-button";
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.title = label;
+  link.setAttribute("aria-label", label);
+  link.innerHTML = icon;
+  return link;
+}
+
+async function copyShareUrl(input: HTMLInputElement, button: HTMLButtonElement): Promise<void> {
+  const label = button.querySelector("span");
+  if (!label) return;
+  const originalLabel = label.textContent || "Copy";
+
+  try {
+    await navigator.clipboard.writeText(input.value);
+    label.textContent = "Copied";
+  } catch (_error) {
+    input.select();
+    label.textContent = document.execCommand("copy") ? "Copied" : "Try again";
+  }
+
+  window.setTimeout(() => {
+    label.textContent = originalLabel;
+  }, 1800);
 }
 
 async function shareScreenshotPage(button: HTMLButtonElement): Promise<void> {

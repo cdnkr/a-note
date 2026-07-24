@@ -8,10 +8,48 @@
     pageUrl,
     xpathForElement,
   } = globalThis.AnnotateLib;
+  const {
+    COMMENT_MAX_WIDTH,
+    commentLayout,
+    connectorGeometry,
+    expandRect,
+    manualPositionMatchesViewport,
+  } = globalThis.AnnotateLayout;
 
-  const PAGE_COMMENT_MAX_WIDTH = 340;
   const COLOR_STORAGE_KEY = "annotate:annotation-color";
+  const MANUAL_POSITION_STORAGE_PREFIX = "annotate:manual-positions:";
   const DEFAULT_COLOR_ID = "cobalt";
+  const DRAG_THRESHOLD = 3;
+  const EXCALIFONT_SUBSETS = [
+    {
+      file: "Excalifont-Regular-a88b72a24fb54c9f94e3b5fdaa7481c9.woff2",
+      range: "U+20-7e,U+a0-a3,U+a5-a6,U+a8-ab,U+ad-b1,U+b4,U+b6-b8,U+ba-ff,U+131,U+152-153,U+2bc,U+2c6,U+2da,U+2dc,U+304,U+308,U+2013-2014,U+2018-201a,U+201c-201e,U+2020,U+2022,U+2024-2026,U+2030,U+2039-203a,U+20ac,U+2122,U+2212",
+    },
+    {
+      file: "Excalifont-Regular-be310b9bcd4f1a43f571c46df7809174.woff2",
+      range: "U+100-130,U+132-137,U+139-149,U+14c-151,U+154-17e,U+192,U+1fc-1ff,U+218-21b,U+237,U+1e80-1e85,U+1ef2-1ef3,U+2113",
+    },
+    {
+      file: "Excalifont-Regular-b9dcf9d2e50a1eaf42fc664b50a3fd0d.woff2",
+      range: "U+400-45f,U+490-491,U+2116",
+    },
+    {
+      file: "Excalifont-Regular-41b173a47b57366892116a575a43e2b6.woff2",
+      range: "U+37e,U+384-38a,U+38c,U+38e-393,U+395-3a1,U+3a3-3a8,U+3aa-3cf,U+3d7",
+    },
+    {
+      file: "Excalifont-Regular-3f2c5db56cc93c5a6873b1361d730c16.woff2",
+      range: "U+2c7,U+2d8-2d9,U+2db,U+2dd,U+302,U+306-307,U+30a-30c,U+326-328,U+212e,U+2211,U+fb01-fb02",
+    },
+    {
+      file: "Excalifont-Regular-349fac6ca4700ffec595a7150a0d1e1d.woff2",
+      range: "U+462-463,U+472-475,U+4d8-4d9,U+4e2-4e3,U+4e6-4e9,U+4ee-4ef",
+    },
+    {
+      file: "Excalifont-Regular-623ccf21b21ef6b3a0d87738f77eb071.woff2",
+      range: "U+300-301,U+303",
+    },
+  ];
   const ANNOTATION_COLORS = [
     { id: "cobalt", label: "Cobalt", value: "#405cf5", foreground: "#ffffff" },
     { id: "indigo", label: "Indigo", value: "#4f46e5", foreground: "#ffffff" },
@@ -37,6 +75,8 @@
     preview: null,
     colorId: DEFAULT_COLOR_ID,
     colorPickerOpen: false,
+    manualPositions: new Map(),
+    dragging: null,
   };
 
   let pageKey = pageUrl(location.href);
@@ -59,10 +99,10 @@
         <button class="preview-close ghost-icon" type="button" aria-label="Close screenshot preview">${icon("close")}</button>
         <div class="preview-image-shell">
           <img class="preview-image" alt="Captured annotated viewport">
-        </div>
-        <div class="preview-actions">
-          <button class="preview-share ghost-button" type="button">${icon("share")}<span>Share</span></button>
-          <button class="preview-download ghost-button" type="button">${icon("download")}<span>Download</span></button>
+          <div class="preview-actions">
+            <button class="preview-share preview-action" type="button" aria-label="Share screenshot" title="Share screenshot">${icon("share")}</button>
+            <button class="preview-download preview-action" type="button" aria-label="Download screenshot" title="Download screenshot">${icon("download")}</button>
+          </div>
         </div>
         <div class="preview-link">
           <span class="sr-only">Screenshot share link</span>
@@ -79,12 +119,12 @@
       </section>
       <div class="toolbar">
         <span class="brand-mark" aria-hidden="true">A</span>
-        <button class="toolbar-action screenshot-button" type="button" aria-label="Capture viewport" title="Capture viewport">
-          ${icon("screenshot")}
-        </button>
         <button class="color-button" type="button" aria-label="Choose annotation colour" title="Choose annotation colour" aria-expanded="false"></button>
         <button class="toolbar-action start-button" type="button" aria-label="Add annotation" title="Add annotation" aria-pressed="false">
           ${icon("plus")}
+        </button>
+        <button class="toolbar-action screenshot-button" type="button" aria-label="Capture viewport" title="Capture viewport">
+          ${icon("screenshot")}
         </button>
         <button class="toolbar-action close-mode" type="button" aria-label="Close annotate mode" title="Close annotate mode">
           ${icon("close")}
@@ -140,6 +180,7 @@
       loadAnnotationColor(),
     ]);
     state.annotations = annotations;
+    state.manualPositions = loadManualPositions();
     applyAnnotationColor(colorId, false);
     render();
   }
@@ -173,6 +214,10 @@
       if (event.key === "Escape") closeComposer();
     });
     ui.saveButton.addEventListener("click", saveComposer);
+    ui.pins.addEventListener("pointerdown", startAnnotationDrag);
+    ui.pins.addEventListener("pointermove", moveAnnotationDrag);
+    ui.pins.addEventListener("pointerup", finishAnnotationDrag);
+    ui.pins.addEventListener("pointercancel", finishAnnotationDrag);
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("click", onPageClick, true);
     document.addEventListener("keydown", (event) => {
@@ -186,6 +231,7 @@
     window.addEventListener("scroll", positionAnchoredUi, { passive: true });
     document.addEventListener("scroll", positionAnchoredUi, { capture: true, passive: true });
     window.addEventListener("resize", positionAnchoredUi, { passive: true });
+    document.fonts?.addEventListener?.("loadingdone", positionAnchoredUi);
     window.addEventListener("popstate", handleUrlChange);
     window.addEventListener("hashchange", handleUrlChange);
     window.setInterval(handleUrlChange, 1000);
@@ -208,8 +254,10 @@
     const nextPageKey = pageUrl(location.href);
     if (nextPageKey === pageKey) return;
 
+    finishAnnotationDrag();
     pageKey = nextPageKey;
     state.annotations = await loadAnnotations();
+    state.manualPositions = loadManualPositions();
     closeComposer();
     closePreview();
     setColorPickerOpen(false);
@@ -219,11 +267,9 @@
 
   function refreshResolvedTargets() {
     if (!state.active) return;
-    const expected = new Set(
-      state.annotations
-        .map((annotation) => resolveElement(annotation.xpath))
-        .filter(Boolean),
-    ).size;
+    const expected = state.annotations
+      .filter((annotation) => resolveElement(annotation.xpath))
+      .length;
     const rendered = ui.pins.querySelectorAll(".annotation-stack").length;
     if (expected !== rendered) {
       render();
@@ -237,6 +283,7 @@
     clearTimeout(hostHideTimer);
     chrome.runtime.sendMessage({ type: "ANNOTATE_ACTIVE_CHANGED", active }).catch(() => {});
     if (!active) {
+      finishAnnotationDrag();
       setAnnotating(false);
       closeComposer();
       closePreview();
@@ -291,14 +338,7 @@
     if (!state.annotating || isExtensionUi(event)) return;
     const target = event.target;
     if (!(target instanceof Element) || target === document.documentElement || target === document.body) return;
-    const rect = target.getBoundingClientRect();
-    Object.assign(ui.outline.style, {
-      display: "block",
-      left: `${rect.left}px`,
-      top: `${rect.top}px`,
-      width: `${rect.width}px`,
-      height: `${rect.height}px`,
-    });
+    positionTargetOutline(target.getBoundingClientRect());
   }
 
   function onPageClick(event) {
@@ -310,6 +350,91 @@
     state.composerTarget = target;
     setAnnotating(false, true);
     openComposer();
+  }
+
+  function startAnnotationDrag(event) {
+    if (event.button !== 0 || state.capturing || state.dragging) return;
+    const copy = event.target instanceof Element
+      ? event.target.closest(".page-comment-copy")
+      : null;
+    const stack = copy?.closest(".annotation-stack");
+    const annotation = stack && findAnnotation(stack.dataset.anchor);
+    if (!copy || !stack || !annotation) return;
+
+    const rect = stack.getBoundingClientRect();
+    state.dragging = {
+      id: annotation.id,
+      pointerId: event.pointerId,
+      copy,
+      stack,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      grabX: event.clientX + window.scrollX - (rect.left + window.scrollX),
+      grabY: event.clientY + window.scrollY - (rect.top + window.scrollY),
+      actionSide: stack.dataset.actionSide === "left" ? "left" : "right",
+      moved: false,
+    };
+    copy.setPointerCapture?.(event.pointerId);
+    copy.setAttribute("aria-grabbed", "true");
+    stack.classList.add("is-dragging");
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function moveAnnotationDrag(event) {
+    const drag = state.dragging;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const distance = Math.hypot(
+      event.clientX - drag.startClientX,
+      event.clientY - drag.startClientY,
+    );
+    if (!drag.moved && distance < DRAG_THRESHOLD) return;
+
+    drag.moved = true;
+    const stackWidth = drag.stack.offsetWidth;
+    const stackHeight = drag.stack.offsetHeight;
+    const minimumLeft = window.scrollX + 8;
+    const minimumTop = window.scrollY + 8;
+    const maximumLeft = Math.max(
+      minimumLeft,
+      window.scrollX + window.innerWidth - stackWidth - 8,
+    );
+    const maximumTop = Math.max(
+      minimumTop,
+      window.scrollY + window.innerHeight - stackHeight - 8,
+    );
+    const left = Math.min(
+      Math.max(event.clientX + window.scrollX - drag.grabX, minimumLeft),
+      maximumLeft,
+    );
+    const top = Math.min(
+      Math.max(event.clientY + window.scrollY - drag.grabY, minimumTop),
+      maximumTop,
+    );
+
+    state.manualPositions.set(drag.id, {
+      left,
+      top,
+      screenWidth: window.innerWidth,
+      actionSide: drag.actionSide,
+    });
+    positionPins();
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function finishAnnotationDrag(event) {
+    const drag = state.dragging;
+    if (!drag || (event && event.pointerId !== drag.pointerId)) return;
+    drag.stack.classList.remove("is-dragging");
+    drag.copy.removeAttribute("aria-grabbed");
+    if (drag.copy.hasPointerCapture?.(drag.pointerId)) {
+      drag.copy.releasePointerCapture(drag.pointerId);
+    }
+    state.dragging = null;
+    if (drag.moved) saveManualPositions();
+    event?.preventDefault();
+    event?.stopPropagation();
   }
 
   function isExtensionUi(event) {
@@ -334,31 +459,25 @@
   function positionComposer() {
     if (ui.composer.hidden || !state.composerTarget?.isConnected) return;
     const rect = state.composerTarget.getBoundingClientRect();
-    Object.assign(ui.outline.style, {
-      display: "block",
-      left: `${rect.left}px`,
-      top: `${rect.top}px`,
-      width: `${rect.width}px`,
-      height: `${rect.height}px`,
-    });
-    const stackWidth = pageCommentStackWidth();
-    const width = stackWidth;
-    const existingAnnotation = state.annotations.find(
-      (annotation) => resolveElement(annotation.xpath) === state.composerTarget,
-    );
-    const existingStack = existingAnnotation
-      ? ui.pins.querySelector(`[data-anchor="${cssEscape(existingAnnotation.id)}"]`)
-      : null;
-    const placement = annotationPlacement(rect, stackWidth);
-    placement.left += placement.side === "left" ? stackWidth - width : 0;
+    const outlineRect = positionTargetOutline(rect);
+    const width = Math.min(COMMENT_MAX_WIDTH, window.innerWidth - 16);
+    const placement = annotationPlacement(outlineRect, width);
+    const existingStacks = state.annotations
+      .filter((annotation) => resolveElement(annotation.xpath) === state.composerTarget)
+      .map((annotation) => ui.pins.querySelector(`[data-anchor="${cssEscape(annotation.id)}"]`))
+      .filter((stack) => stack && !stack.hidden);
+    const lastStack = existingStacks.reduce((lowest, stack) => {
+      if (!lowest) return stack;
+      return stack.getBoundingClientRect().bottom > lowest.getBoundingClientRect().bottom
+        ? stack
+        : lowest;
+    }, null);
 
-    if (existingStack && !existingStack.hidden) {
-      const existingComment = existingStack.querySelector(".page-comment");
-      const commentRect = existingComment?.getBoundingClientRect();
-      const stackTop = Number.parseFloat(existingStack.style.top);
-      if (commentRect && Number.isFinite(stackTop)) {
+    if (lastStack) {
+      const commentRect = lastStack.querySelector(".page-comment")?.getBoundingClientRect();
+      if (commentRect) {
         placement.left = commentRect.left + window.scrollX;
-        placement.top = stackTop + existingStack.offsetHeight + 7;
+        placement.top = commentRect.bottom + window.scrollY + 7;
       }
     }
     Object.assign(ui.composer.style, {
@@ -402,6 +521,8 @@
 
   async function deleteAnnotation(id) {
     state.annotations = state.annotations.filter((item) => item.id !== id);
+    state.manualPositions.delete(id);
+    saveManualPositions();
     await saveAnnotations();
     render();
     showToast("Annotation removed");
@@ -409,14 +530,6 @@
 
   async function shareAnnotation(annotation) {
     if (!annotation || state.capturing || state.sharingIds.has(annotation.id)) return;
-    if (annotation.shareUrl && annotation.screenshotUrl) {
-      openPreview({
-        imageUrl: annotation.screenshotUrl,
-        shareUrl: annotation.shareUrl,
-        kind: "note",
-      });
-      return;
-    }
     const element = resolveElement(annotation.xpath);
     if (!element) {
       showToast("Element not found — screenshot unavailable");
@@ -477,6 +590,7 @@
     return chrome.runtime.sendMessage({
       type: "ANNOTATE_CAPTURE_AND_CREATE_SHARE",
       targetUrl: pageKey,
+      colorToken: state.colorId,
     });
   }
 
@@ -493,13 +607,15 @@
     const comment = ui.pins.querySelector(`[data-page-comment="${cssEscape(annotationId)}"]`);
     const commentRow = comment?.closest(".page-comment-row");
     const stack = commentRow?.closest(".annotation-stack");
+    const connector = ui.pins.querySelector(`[data-connector="${cssEscape(annotationId)}"]`);
     commentRow?.classList.add("is-capture-target");
     stack?.classList.add("is-capture-target");
+    connector?.classList.add("is-capture-target");
     host.classList.add("is-capturing", "is-capturing-note");
     positionPins();
     await waitForCaptureFade();
 
-    const rect = element.getBoundingClientRect();
+    const rect = expandRect(element.getBoundingClientRect());
     const commentRect = comment?.getBoundingClientRect();
     const margin = 12;
     if (!isCaptureRectVisible(rect, margin) || !isCaptureRectVisible(commentRect, margin)) {
@@ -510,13 +626,7 @@
     }
 
     const captureRect = element.getBoundingClientRect();
-    Object.assign(ui.outline.style, {
-      display: "block",
-      left: `${captureRect.left}px`,
-      top: `${captureRect.top}px`,
-      width: `${captureRect.width}px`,
-      height: `${captureRect.height}px`,
-    });
+    positionTargetOutline(captureRect);
     await nextPaint();
   }
 
@@ -595,17 +705,10 @@
     const color = ANNOTATION_COLORS.find((option) => option.id === colorId)
       || ANNOTATION_COLORS.find((option) => option.id === DEFAULT_COLOR_ID);
     if (!color) return;
-    const lightForeground = color.foreground === "#ffffff";
     state.colorId = color.id;
     host.style.setProperty("--annotation-color", color.value);
     host.style.setProperty("--annotation-fg", color.foreground);
-    host.style.setProperty("--annotation-outline", colorWithAlpha(color.value, .68));
-    host.style.setProperty("--annotation-tint", colorWithAlpha(color.value, .075));
-    host.style.setProperty("--annotation-halo", colorWithAlpha(color.value, .14));
-    host.style.setProperty("--annotation-action-color", lightForeground ? "rgba(255,255,255,.82)" : "rgba(17,26,46,.78)");
-    host.style.setProperty("--annotation-action-bg", lightForeground ? "rgba(255,255,255,.11)" : "rgba(17,26,46,.09)");
-    host.style.setProperty("--annotation-action-hover", lightForeground ? "rgba(255,255,255,.22)" : "rgba(17,26,46,.16)");
-    host.style.setProperty("--annotation-action-focus", lightForeground ? "rgba(255,255,255,.75)" : "rgba(17,26,46,.68)");
+    host.style.setProperty("--annotation-outline", color.value);
     ui.colorButton.style.backgroundColor = color.value;
     ui.colorButton.setAttribute("aria-label", `Choose annotation colour. Current colour: ${color.label}`);
     ui.colorButton.title = `Annotation colour: ${color.label}`;
@@ -617,14 +720,6 @@
     if (persist) {
       chrome.storage.local.set({ [COLOR_STORAGE_KEY]: color.id }).catch(() => {});
     }
-  }
-
-  function colorWithAlpha(hex, alpha) {
-    const value = Number.parseInt(hex.slice(1), 16);
-    const red = (value >> 16) & 255;
-    const green = (value >> 8) & 255;
-    const blue = value & 255;
-    return `rgba(${red},${green},${blue},${alpha})`;
   }
 
   function openPreview(preview) {
@@ -744,33 +839,28 @@
   }
 
   function renderPins() {
-    const groups = new Map();
+    finishAnnotationDrag();
     let revealIndex = 0;
-    state.annotations.forEach((annotation, index) => {
+    ui.pins.innerHTML = state.annotations.map((annotation) => {
       const element = resolveElement(annotation.xpath);
-      if (!element) return;
-      if (!groups.has(element)) groups.set(element, []);
-      groups.get(element).push({ annotation, number: index + 1 });
-    });
-
-    ui.pins.innerHTML = [...groups.values()].map((items) => {
-      const anchorId = items[0].annotation.id;
-      const comments = items.map(({ annotation }) => {
-        const revealDelay = revealIndex * 50;
-        const sharing = state.sharingIds.has(annotation.id);
-        revealIndex += 1;
-        return `
+      if (!element) return "";
+      const revealDelay = revealIndex * 50;
+      const sharing = state.sharingIds.has(annotation.id);
+      revealIndex += 1;
+      return `
+        <svg class="annotation-connector" data-connector="${escapeHtml(annotation.id)}" aria-hidden="true"><path></path></svg>
+        <div class="element-highlight" data-highlight="${escapeHtml(annotation.id)}" aria-hidden="true"></div>
+        <div class="annotation-stack" data-anchor="${escapeHtml(annotation.id)}">
         <div class="page-comment-row" style="--reveal-delay: ${revealDelay}ms">
           <article class="page-comment" data-page-comment="${escapeHtml(annotation.id)}">
             <span class="page-comment-copy">${escapeHtml(annotation.content)}</span>
             <span class="page-comment-actions">
-              <button class="page-comment-action page-comment-share" type="button" data-page-share="${escapeHtml(annotation.id)}" aria-label="Share annotation" title="Share annotation" aria-busy="${sharing}" ${sharing ? "disabled" : ""}>${icon("share")}</button>
-              <button class="page-comment-action page-comment-delete" type="button" data-page-delete="${escapeHtml(annotation.id)}" aria-label="Delete annotation" title="Delete annotation">${icon("trash")}</button>
+              <button class="page-comment-action page-comment-share" type="button" data-page-share="${escapeHtml(annotation.id)}" aria-label="Share annotation" title="Share annotation" aria-busy="${sharing}" ${sharing ? "disabled" : ""}>${icon("screenshot")}</button>
+              <button class="page-comment-action page-comment-delete" type="button" data-page-delete="${escapeHtml(annotation.id)}" aria-label="Delete annotation" title="Delete annotation">${icon("close")}</button>
             </span>
           </article>
+        </div>
         </div>`;
-      }).join("");
-      return `<div class="element-highlight" data-highlight="${escapeHtml(anchorId)}" aria-hidden="true"></div><div class="annotation-stack" data-anchor="${escapeHtml(anchorId)}">${comments}</div>`;
     }).join("");
 
     ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
@@ -782,62 +872,113 @@
     positionPins();
   }
 
-  function annotationPlacement(rect, width) {
-    let left;
-    let top = rect.top;
-    let side;
-    if (rect.right + width + 12 <= window.innerWidth) {
-      left = rect.right + 10;
-      side = "right";
-    } else if (rect.left - width - 12 >= 0) {
-      left = rect.left - width - 10;
-      side = "left";
-    } else {
-      left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
-      top = rect.bottom + 8;
-      side = "below";
-    }
+  function annotationPlacement(rect, noteWidth) {
+    const placement = commentLayout(rect, window.innerWidth, noteWidth);
     return {
-      left: left + window.scrollX,
-      top: top + window.scrollY,
-      side,
+      ...placement,
+      left: placement.left + window.scrollX,
+      top: placement.top + window.scrollY,
     };
   }
 
-  function pageCommentStackWidth() {
-    return Math.min(PAGE_COMMENT_MAX_WIDTH, window.innerWidth - 16);
+  function positionTargetOutline(rect) {
+    const outlineRect = expandRect(rect);
+    Object.assign(ui.outline.style, {
+      display: "block",
+      left: `${outlineRect.left}px`,
+      top: `${outlineRect.top}px`,
+      width: `${outlineRect.width}px`,
+      height: `${outlineRect.height}px`,
+    });
+    return outlineRect;
   }
 
   function positionPins() {
     if (!state.active) return;
+    const automaticOffsets = new Map();
     ui.pins.querySelectorAll(".annotation-stack").forEach((stack) => {
       const annotation = findAnnotation(stack.dataset.anchor);
       const element = annotation && resolveElement(annotation.xpath);
       const highlight = ui.pins.querySelector(`[data-highlight="${cssEscape(stack.dataset.anchor)}"]`);
+      const connector = ui.pins.querySelector(`[data-connector="${cssEscape(stack.dataset.anchor)}"]`);
       if (!element) {
         stack.hidden = true;
         if (highlight) highlight.hidden = true;
+        if (connector) connector.hidden = true;
         return;
       }
       const rect = element.getBoundingClientRect();
-      const outsideViewport = rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth;
+      const outlineRect = expandRect(rect);
+      const outsideViewport = outlineRect.bottom < 0
+        || outlineRect.top > window.innerHeight
+        || outlineRect.right < 0
+        || outlineRect.left > window.innerWidth;
       stack.hidden = outsideViewport;
       if (highlight) {
         highlight.hidden = outsideViewport;
-        highlight.style.left = `${rect.left + window.scrollX}px`;
-        highlight.style.top = `${rect.top + window.scrollY}px`;
-        highlight.style.width = `${rect.width}px`;
-        highlight.style.height = `${rect.height}px`;
+        highlight.style.left = `${outlineRect.left + window.scrollX}px`;
+        highlight.style.top = `${outlineRect.top + window.scrollY}px`;
+        highlight.style.width = `${outlineRect.width}px`;
+        highlight.style.height = `${outlineRect.height}px`;
       }
-      if (outsideViewport) return;
+      if (outsideViewport) {
+        if (connector) connector.hidden = true;
+        return;
+      }
 
-      const width = pageCommentStackWidth();
-      const placement = annotationPlacement(rect, width);
-      stack.dataset.placement = placement.side;
-      stack.style.width = `${width}px`;
+      stack.style.removeProperty("width");
+      const noteWidth = stack.getBoundingClientRect().width;
+      const manualPosition = state.manualPositions.get(annotation.id);
+      if (manualPositionMatchesViewport(manualPosition, window.innerWidth)) {
+        stack.dataset.placement = "manual";
+        stack.dataset.actionSide = manualPosition.actionSide === "left" ? "left" : "right";
+        stack.classList.add("is-manual");
+        stack.style.left = `${manualPosition.left}px`;
+        stack.style.top = `${manualPosition.top}px`;
+        positionConnector(connector, outlineRect, stack);
+        return;
+      }
+
+      stack.classList.remove("is-manual");
+      if (connector) connector.hidden = true;
+      const placement = annotationPlacement(outlineRect, noteWidth);
+      const offset = automaticOffsets.get(element) || 0;
+      placement.top += offset;
+      automaticOffsets.set(element, offset + stack.offsetHeight + 7);
+      stack.dataset.placement = placement.placement;
+      stack.dataset.actionSide = placement.actionSide;
       stack.style.left = `${placement.left}px`;
       stack.style.top = `${placement.top}px`;
     });
+  }
+
+  function positionConnector(connector, outlineRect, stack) {
+    const copyRect = stack.querySelector(".page-comment-copy")?.getBoundingClientRect();
+    if (!connector || !copyRect) return;
+    const targetRect = {
+      left: outlineRect.left + window.scrollX,
+      top: outlineRect.top + window.scrollY,
+      right: outlineRect.right + window.scrollX,
+      bottom: outlineRect.bottom + window.scrollY,
+      width: outlineRect.width,
+      height: outlineRect.height,
+    };
+    const annotationRect = {
+      left: copyRect.left + window.scrollX,
+      top: copyRect.top + window.scrollY,
+      right: copyRect.right + window.scrollX,
+      bottom: copyRect.bottom + window.scrollY,
+      width: copyRect.width,
+      height: copyRect.height,
+    };
+    const geometry = connectorGeometry(targetRect, annotationRect);
+    connector.hidden = false;
+    connector.style.left = `${geometry.left}px`;
+    connector.style.top = `${geometry.top}px`;
+    connector.style.width = `${geometry.width}px`;
+    connector.style.height = `${geometry.height}px`;
+    connector.setAttribute("viewBox", `0 0 ${geometry.width} ${geometry.height}`);
+    connector.querySelector("path")?.setAttribute("d", geometry.path);
   }
 
   function positionAnchoredUi() {
@@ -867,6 +1008,34 @@
     } catch (_error) {
       return DEFAULT_COLOR_ID;
     }
+  }
+
+  function loadManualPositions() {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(manualPositionStorageKey()) || "{}");
+      return new Map(
+        Object.entries(stored).filter(([, position]) => (
+          manualPositionMatchesViewport(position, position?.screenWidth)
+        )),
+      );
+    } catch (_error) {
+      return new Map();
+    }
+  }
+
+  function saveManualPositions() {
+    try {
+      window.localStorage.setItem(
+        manualPositionStorageKey(),
+        JSON.stringify(Object.fromEntries(state.manualPositions)),
+      );
+    } catch (_error) {
+      // Annotation dragging remains available in memory when page storage is unavailable.
+    }
+  }
+
+  function manualPositionStorageKey() {
+    return `${MANUAL_POSITION_STORAGE_PREFIX}${pageKey}`;
   }
 
   async function saveAnnotations() {
@@ -921,16 +1090,29 @@
       screenshot: '<svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2m8 0h2a2 2 0 0 1 2 2v2m0 8v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><rect x="7" y="8" width="10" height="8" rx="2"/><circle cx="12" cy="12" r="2"/></svg>',
       download: '<svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg>',
       copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
-      trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>',
       warning: '<svg viewBox="0 0 24 24"><path d="m12 3 9 17H3L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg>',
       cursor: '<svg viewBox="0 0 24 24"><path d="m5 3 14 9-6 1-3 6L5 3Z"/></svg>',
     };
     return icons[name] || "";
   }
 
+  function excalifontFontFaces() {
+    return EXCALIFONT_SUBSETS.map(({ file, range }) => `
+      @font-face {
+        font-family: "Excalifont";
+        src: url("${chrome.runtime.getURL(`fonts/${file}`)}") format("woff2");
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        unicode-range: ${range};
+      }
+    `).join("");
+  }
+
   function styles() {
     return `
-      :host { all: initial; --navy: #111a2e; --ink: #222b3e; --muted: #667085; --blue: #405cf5; --blue-dark: #2e48e8; --blue-pale: #edf3ff; --pink: #fff1f3; --line: #e7eaf0; --ink-black: #000000; --snow: #ffffff; --canvas: #f8f8f8; --fog: #efefef; --pebble: #d9d9d9; --graphite: #636363; --slate: #959595; --steel: #aeaeae; --ash: #7c7c7c; --annotation-color: #405cf5; --annotation-fg: #ffffff; --annotation-outline: rgba(64,92,245,.68); --annotation-tint: rgba(64,92,245,.075); --annotation-halo: rgba(64,92,245,.14); --annotation-action-color: rgba(255,255,255,.82); --annotation-action-bg: rgba(255,255,255,.11); --annotation-action-hover: rgba(255,255,255,.22); --annotation-action-focus: rgba(255,255,255,.75); font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--navy); }
+      ${excalifontFontFaces()}
+      :host { all: initial; --navy: #111a2e; --ink: #222b3e; --muted: #667085; --blue: #405cf5; --blue-dark: #2e48e8; --blue-pale: #edf3ff; --pink: #fff1f3; --line: #e7eaf0; --ink-black: #000000; --snow: #ffffff; --canvas: #f8f8f8; --fog: #efefef; --pebble: #d9d9d9; --graphite: #636363; --slate: #959595; --steel: #aeaeae; --ash: #7c7c7c; --annotation-color: #405cf5; --annotation-fg: #ffffff; --annotation-outline: #405cf5; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--navy); }
       *, *::before, *::after { box-sizing: border-box; }
       button, textarea { font: inherit; }
       button { color: inherit; }
@@ -938,30 +1120,31 @@
       .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
       .dock { position: fixed; z-index: 2147483645; right: 22px; bottom: 22px; width: 360px; opacity: 0; transform: translateX(calc(100% + 32px)); transition: transform .28s cubic-bezier(.22, 1, .36, 1), opacity .18s ease; filter: drop-shadow(0 18px 40px rgba(20, 29, 50, .16)); }
       .dock.is-visible { opacity: 1; transform: translateX(0); }
-      .toolbar { width: max-content; min-height: 68px; margin-left: auto; padding: 12px; border: 1px solid rgba(17,26,46,.08); background: #fff; border-radius: 18px; display: flex; align-items: center; gap: 8px; box-shadow: 0 3px 12px rgba(20,29,50,.07); transition: opacity .18s ease; }
-      .brand-mark { width: 42px; height: 42px; border-radius: 12px 12px 12px 3px; display: grid; place-items: center; background: var(--annotation-color); color: var(--annotation-fg); font-size: 18px; font-weight: 850; line-height: 1; transition: background .16s ease, color .16s ease; }
-      .toolbar-action { flex: 0 0 auto; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ash); display: grid; place-items: center; cursor: pointer; transition: transform .16s ease, background .16s ease, color .16s ease; }
-      .toolbar-action:hover:not(:disabled) { background: var(--fog); color: var(--ink-black); transform: translateY(-1px); }
-      .toolbar-action:focus-visible, .ghost-icon:focus-visible, .ghost-button:focus-visible, .preview-copy:focus-visible { outline: 2px solid rgba(64,92,245,.34); outline-offset: 2px; }
+      .toolbar { width: max-content; min-height: 68px; margin-left: auto; padding: 12px; border: 1px solid rgba(17,26,46,.08); background: #fff; border-radius: 18px 18px 18px 4.5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 3px 12px rgba(20,29,50,.07); transition: opacity .18s ease; }
+      .brand-mark { width: 42px; height: 42px; border-radius: 12px 12px 12px 3px; display: grid; place-items: center; background: var(--annotation-color); color: var(--annotation-fg); font-family: "Excalifont", "Marker Felt", "Segoe Print", "Comic Sans MS", cursive; font-size: 18px; font-weight: 850; line-height: 1; transition: background .16s ease, color .16s ease; }
+      .toolbar-action { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.05); color: var(--ash); display: grid; place-items: center; cursor: pointer; transition: background .16s ease, color .16s ease; }
+      .toolbar-action:hover:not(:disabled) { background: rgba(0,0,0,.10); color: var(--ink-black); }
+      .toolbar-action:focus-visible, .ghost-icon:focus-visible, .preview-action:focus-visible, .preview-copy:focus-visible { outline: 2px solid rgba(64,92,245,.34); outline-offset: 2px; }
       .toolbar-action:disabled { opacity: .48; cursor: wait; }
+      .toolbar-action svg { width: 21px; height: 21px; }
       .color-button { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 2px solid var(--snow); border-radius: 50%; background: var(--annotation-color); cursor: pointer; box-shadow: 0 0 0 1px rgba(17,26,46,.14), 0 4px 10px rgba(17,26,46,.12); transition: transform .16s ease, box-shadow .16s ease, background .16s ease; }
-      .color-button:hover:not(:disabled) { transform: translateY(-1px) scale(1.04); box-shadow: 0 0 0 2px rgba(17,26,46,.18), 0 6px 13px rgba(17,26,46,.15); }
+      .color-button:hover:not(:disabled) { transform: scale(1.04); box-shadow: 0 0 0 2px rgba(17,26,46,.18), 0 6px 13px rgba(17,26,46,.15); }
       .color-button:focus-visible, .color-button.is-active { outline: none; box-shadow: 0 0 0 3px var(--snow), 0 0 0 5px var(--navy); }
       .color-button:disabled { opacity: .48; cursor: wait; }
       .start-button.is-active { background: var(--navy); color: var(--snow); box-shadow: 0 5px 12px rgba(17,26,46,.22); }
       .start-button.is-active:hover:not(:disabled) { background: #050a15; color: var(--snow); }
       .capture-preview, .color-picker { position: relative; width: 100%; margin-bottom: 10px; padding: 10px; overflow: hidden; border: 1px solid rgba(17,26,46,.08); border-radius: 20px; background: var(--snow); opacity: 0; transform: translateY(8px) scale(.99); transition: opacity .18s ease, transform .2s cubic-bezier(.22, 1, .36, 1); box-shadow: 0 16px 44px rgba(17,26,46,.16); }
       .capture-preview.is-visible, .color-picker.is-visible { opacity: 1; transform: translateY(0) scale(1); }
-      .preview-image-shell { overflow: hidden; min-height: 132px; max-height: min(280px, 42vh); border-radius: 13px; display: grid; place-items: center; background: var(--fog); }
+      .preview-image-shell { position: relative; overflow: hidden; min-height: 132px; max-height: min(280px, 42vh); border-radius: 13px; display: grid; place-items: center; background: var(--fog); }
       .preview-image { display: block; width: 100%; height: auto; max-height: min(280px, 42vh); object-fit: contain; }
       .ghost-icon { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.88); color: var(--graphite); cursor: pointer; box-shadow: 0 3px 10px rgba(17,26,46,.12); }
       .preview-close { position: absolute; z-index: 2; top: 17px; right: 17px; }
       .ghost-icon:hover { background: var(--snow); color: var(--ink-black); }
-      .preview-actions { display: flex; gap: 8px; padding: 10px 1px 8px; }
-      .ghost-button { min-height: 34px; padding: 0 11px; border: 0; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; background: var(--canvas); color: var(--graphite); font-size: 10px; font-weight: 750; cursor: pointer; }
-      .ghost-button:hover:not(:disabled) { background: var(--fog); color: var(--ink-black); }
-      .ghost-button:disabled { opacity: .46; cursor: not-allowed; }
-      .ghost-button svg { width: 15px; height: 15px; }
+      .preview-actions { position: absolute; z-index: 2; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+      .preview-action { width: 32px; height: 32px; padding: 0; border: 1px solid rgba(17,26,46,.08); border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.9); color: var(--graphite); cursor: pointer; box-shadow: 0 3px 10px rgba(17,26,46,.14); backdrop-filter: blur(5px); }
+      .preview-action:hover:not(:disabled) { background: var(--snow); color: var(--ink-black); }
+      .preview-action:disabled { opacity: .46; cursor: not-allowed; }
+      .preview-action svg { width: 15px; height: 15px; }
       .preview-link { position: relative; display: block; }
       .preview-link input { width: 100%; height: 42px; padding: 0 76px 0 12px; border: 1px solid var(--line); border-radius: 12px; outline: none; background: var(--canvas); color: var(--graphite); font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
       .preview-link input:focus { border-color: rgba(64,92,245,.45); box-shadow: 0 0 0 3px rgba(64,92,245,.10); }
@@ -989,35 +1172,38 @@
       .composer textarea::placeholder { color: #a0a6b3; }
       .composer-foot { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
       .composer-foot button { pointer-events: auto; }
-      .save-button { width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; background: var(--blue); color: #fff; display: grid; place-items: center; cursor: pointer; box-shadow: 0 5px 12px rgba(64,92,245,.25); transition: background .16s ease, transform .16s ease; }
-      .save-button:hover:not(:disabled) { background: var(--blue-dark); transform: translateY(-1px); }
+      .save-button { width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; background: var(--annotation-color); color: var(--annotation-fg); display: grid; place-items: center; cursor: pointer; box-shadow: 0 5px 12px rgba(17,26,46,.18); transition: background .16s ease, color .16s ease, filter .16s ease, transform .16s ease; }
+      .save-button:hover:not(:disabled) { filter: brightness(.92); transform: translateY(-1px); }
       .save-button:disabled { opacity: .4; cursor: not-allowed; }
       .save-button svg { width: 19px; height: 19px; stroke-width: 2; }
-      .target-outline { display: none; position: fixed; z-index: 2147483643; pointer-events: none; border: 2px solid var(--annotation-color); border-radius: 5px; background: var(--annotation-tint); box-shadow: 0 0 0 3px var(--annotation-halo), inset 0 0 0 1px rgba(255,255,255,.65); transition: left .04s, top .04s, width .04s, height .04s, border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+      .target-outline { display: none; position: fixed; z-index: 2147483643; pointer-events: none; border: 2px solid var(--annotation-outline); border-radius: 5px; background: transparent; box-shadow: none; transition: left .04s, top .04s, width .04s, height .04s, border-color .16s ease; }
       .pins { position: absolute; left: 0; top: 0; z-index: 2147483644; pointer-events: none; }
-      .element-highlight { position: absolute; pointer-events: none; border: 1.5px solid var(--annotation-outline); border-radius: 5px; background: var(--annotation-tint); box-shadow: 0 0 0 2px var(--annotation-halo); transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
-      .pins.is-exiting .element-highlight { opacity: 0; transition: opacity .2s ease; }
-      .annotation-stack { position: absolute; display: flex; flex-direction: column; gap: 7px; pointer-events: auto; }
-      .page-comment-row { width: 100%; animation: annotation-reveal .28s cubic-bezier(.22, 1, .36, 1) both; animation-delay: var(--reveal-delay, 0ms); }
-      .page-comment { border: none; width: 100%; min-height: 48px; padding: 8px 8px 8px 14px; border-radius: 12px 12px 12px 6px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; background: var(--annotation-color); color: var(--annotation-fg); text-align: left; box-shadow: 0 8px 24px rgba(17,26,46,.14); transition: transform .16s ease, box-shadow .16s ease, background .16s ease, color .16s ease; }
-      .annotation-stack[data-placement="left"] .page-comment { padding: 9px 14px 9px 11px; border-radius: 12px 12px 6px 12px; }
-      .annotation-stack[data-placement="below"] .page-comment { padding: 14px 11px 9px; border-radius: 6px 12px 12px; }
+      .annotation-connector { position: absolute; z-index: 0; display: block; overflow: visible; pointer-events: none; }
+      .annotation-connector path { fill: none; stroke: var(--annotation-outline); stroke-width: 1.75; stroke-linecap: round; vector-effect: non-scaling-stroke; transition: stroke .16s ease; }
+      .element-highlight { position: absolute; z-index: 1; pointer-events: none; border: 1.5px solid var(--annotation-outline); border-radius: 5px; background: transparent; box-shadow: none; transition: border-color .16s ease; }
+      .pins.is-exiting .element-highlight, .pins.is-exiting .annotation-connector { opacity: 0; transition: opacity .2s ease; }
+      .annotation-stack { position: absolute; z-index: 2; width: max-content; max-width: calc(100vw - 16px); display: flex; flex-direction: column; align-items: flex-start; gap: 7px; pointer-events: none; }
+      .annotation-stack[data-action-side="left"] { align-items: flex-end; }
+      .annotation-stack.is-dragging { z-index: 3; }
+      .page-comment-row { width: max-content; max-width: 100%; min-height: 24px; animation: annotation-reveal .28s cubic-bezier(.22, 1, .36, 1) both; animation-delay: var(--reveal-delay, 0ms); }
+      .annotation-stack.is-manual .page-comment-row, .annotation-stack.is-dragging .page-comment-row { animation: none; }
+      .page-comment { width: max-content; max-width: 100%; min-height: 24px; padding: 0; border: 0; border-radius: 0; display: flex; align-items: flex-start; gap: 6px; background: transparent; color: var(--annotation-color); text-align: left; box-shadow: none; transition: color .16s ease; }
+      .annotation-stack[data-action-side="left"] .page-comment { flex-direction: row-reverse; }
       .page-comment-row.is-exiting { pointer-events: none; animation: annotation-dismiss .22s cubic-bezier(.55, 0, 1, .45) both; animation-delay: var(--exit-delay, 0ms); }
-      .page-comment:hover { transform: translateY(-1px); border-color: rgba(64,92,245,.42); box-shadow: 0 11px 28px rgba(17,26,46,.18); }
-      .page-comment-actions { display: flex; align-items: center; gap: 4px; }
-      .page-comment-action { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9px; display: grid; place-items: center; color: var(--annotation-action-color); background: var(--annotation-action-bg); cursor: pointer; box-shadow: none; transition: background .16s ease, color .16s ease, transform .16s ease, opacity .16s ease; }
-      .page-comment-action:hover:not(:disabled) { background: var(--annotation-action-hover); color: var(--annotation-fg); transform: translateY(-1px); }
-      .page-comment-action:focus-visible { outline: 2px solid var(--annotation-action-focus); outline-offset: 1px; }
+      .page-comment-actions { flex: 0 0 auto; display: flex; flex-direction: row; align-items: center; gap: 3px; pointer-events: auto; }
+      .page-comment-action { width: 24px; height: 24px; padding: 0; border: 1px solid rgba(17,26,46,.10); border-radius: 7px; display: grid; place-items: center; color: var(--graphite); background: rgba(255,255,255,.92); cursor: pointer; box-shadow: 0 2px 7px rgba(17,26,46,.11); backdrop-filter: blur(8px); transition: background .16s ease, color .16s ease, transform .16s ease, opacity .16s ease; }
+      .page-comment-action:hover:not(:disabled) { background: var(--snow); color: var(--ink-black); transform: translateY(-1px); }
+      .page-comment-action:focus-visible { outline: 2px solid rgba(64,92,245,.38); outline-offset: 1px; }
       .page-comment-action:disabled { opacity: .58; cursor: wait; }
-      .page-comment-action svg { width: 15px; height: 15px; stroke-width: 2; }
-      .page-comment-copy { font-size: 12px; font-weight: 650; line-height: 1.4; word-break: break-word; }
+      .page-comment-action svg { width: 12px; height: 12px; stroke-width: 2; }
+      .page-comment-copy { flex: 0 1 auto; display: block; width: max-content; min-width: 0; max-width: min(340px, calc(100vw - 73px)); font-family: "Excalifont", "Marker Felt", "Segoe Print", "Comic Sans MS", cursive; font-size: 16px; font-style: normal; font-weight: 400; line-height: 1.3; font-synthesis: none; overflow-wrap: anywhere; padding: 0 5px; background: white; border: 1px solid rgba(0,0,0,0.05); border-radius: 5px; pointer-events: auto; cursor: move; user-select: none; touch-action: none; }
+      .annotation-stack.is-dragging .page-comment-copy { cursor: grabbing; }
       .toast { position: fixed; z-index: 2147483647; left: 50%; bottom: 24px; transform: translate(-50%, 20px); padding: 10px 14px; border-radius: 10px; background: var(--navy); color: #fff; font-size: 12px; font-weight: 650; opacity: 0; pointer-events: none; transition: .2s ease; box-shadow: 0 10px 30px rgba(17,26,46,.25); }
       .toast.show { opacity: 1; transform: translate(-50%, 0); }
       :host(.is-capturing) .dock, :host(.is-capturing) .composer, :host(.is-capturing) .toast { opacity: 0 !important; pointer-events: none !important; }
-      :host(.is-capturing) .page-comment { grid-template-columns: minmax(0, 1fr); }
       :host(.is-capturing) .page-comment-actions { display: none !important; }
-      :host(.is-capturing-note) .element-highlight, :host(.is-capturing-note) .annotation-stack { visibility: hidden !important; }
-      :host(.is-capturing-note) .annotation-stack.is-capture-target { visibility: visible !important; }
+      :host(.is-capturing-note) .element-highlight, :host(.is-capturing-note) .annotation-stack, :host(.is-capturing-note) .annotation-connector { visibility: hidden !important; }
+      :host(.is-capturing-note) .annotation-stack.is-capture-target, :host(.is-capturing-note) .annotation-connector.is-capture-target { visibility: visible !important; }
       :host(.is-capturing-note) .annotation-stack.is-capture-target .page-comment-row { display: none; }
       :host(.is-capturing-note) .annotation-stack.is-capture-target .page-comment-row.is-capture-target { display: block; animation: none; }
       :host(.is-capturing-note) .target-outline { visibility: visible !important; border: 2px solid var(--annotation-color); background: transparent; box-shadow: none; transition: none; }

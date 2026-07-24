@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchShareRecord,
   ShareRequestError,
+  shareColorFromSearch,
   shareIdFromPath,
   type ShareRecord,
 } from "./share-client";
@@ -18,6 +19,17 @@ describe("share routes", () => {
     expect(shareIdFromPath(`/s/${SHARE_ID}/`)).toBe(SHARE_ID);
     expect(shareIdFromPath("/s/short")).toBeNull();
     expect(shareIdFromPath(`/other/${SHARE_ID}`)).toBeNull();
+  });
+
+  it("resolves supported share colours and falls back to cobalt", () => {
+    expect(shareColorFromSearch("?c=orange")).toMatchObject({
+      token: "orange",
+      value: "#f97316",
+      foreground: "#111a2e",
+    });
+    expect(shareColorFromSearch("")).toMatchObject({ token: "cobalt", value: "#405cf5" });
+    expect(shareColorFromSearch("?c=chartreuse")).toMatchObject({ token: "cobalt", value: "#405cf5" });
+    expect(shareColorFromSearch("?c=toString")).toMatchObject({ token: "cobalt", value: "#405cf5" });
   });
 });
 
