@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "annotate",
+  "version": "1.1.0",
+  "description": "Highlight elements, leave local comments, and share annotations by URL.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Toggle annotate mode"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://annotate.example/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["config.js", "lib.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+name = "annotate-web"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-07-15"
+
+[[r2_buckets]]
+binding = "SHARES"
+bucket_name = "annotate-shares"
+preview_bucket_name = "annotate-shares-preview"
