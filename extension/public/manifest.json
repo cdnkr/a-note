@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "description": "Leave notes in place, on web pages, and share them as screenshots.",
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"],
   "icons": {
     "16": "icons/a-cobalt-16.png",
     "32": "icons/a-cobalt-32.png",
