@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "A-Note",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "Leave notes in place, on web pages, and share them as screenshots.",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
