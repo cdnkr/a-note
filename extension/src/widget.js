@@ -14,6 +14,7 @@
     connectorGeometry,
     expandRect,
     manualPositionMatchesViewport,
+    responsivePosition,
     setConnectorVisible,
   } = globalThis.ANoteLayout;
   const {
@@ -1016,7 +1017,10 @@
       }
 
       const placement = annotationPlacement(outlineRect, noteWidth);
-      const seedPosition = seedPositions.get(annotation.id);
+      const seedPosition = responsivePosition(
+        seedPositions.get(annotation.id),
+        window.innerWidth,
+      );
       if (seedPosition && (!seedPosition.minWidth || window.innerWidth >= seedPosition.minWidth)) {
         const actionSide = seedPosition.actionSide === "left"
           || seedPosition.actionSide === "right"

@@ -21,6 +21,13 @@ type AnnotationSeed = {
     y?: number;
     actionSide?: "left" | "right";
     pagePinned?: boolean;
+    // Keep these ranges exclusive: the first matching entry supplies both axes.
+    breakpoints?: {
+      minWidth?: number;
+      maxWidth?: number;
+      x: number;
+      y: number;
+    }[];
   };
 };
 
@@ -67,7 +74,11 @@ const seeds: AnnotationSeed[] = [
     content: "Like this",
     position: {
       y: 40,
-      x: 240
+      x: 240,
+      breakpoints: [
+        { maxWidth: 520, x: -80, y: -206 },
+        { minWidth: 521, maxWidth: 800, x: 40, y: 30 },
+      ],
     },
   },
   {
@@ -77,7 +88,11 @@ const seeds: AnnotationSeed[] = [
     content: "Use on any page",
     position: {
       y: -100,
-      x: -200
+      x: -200,
+      breakpoints: [
+        { maxWidth: 520, x: -60, y: -40 },
+        { minWidth: 521, maxWidth: 800, x: -120, y: -80 },
+      ],
     },
   },
   // {
@@ -98,6 +113,10 @@ const seeds: AnnotationSeed[] = [
       y: -350,
       actionSide: "left",
       pagePinned: true,
+      breakpoints: [
+        { maxWidth: 520, x: 30, y: 0 },
+        { minWidth: 521, maxWidth: 800, x: -40, y: -310 },
+      ],
     },
   },
   {
@@ -108,7 +127,11 @@ const seeds: AnnotationSeed[] = [
     position: {
       y: -10,
       x: -680,
-      actionSide: "left"
+      actionSide: "left",
+      breakpoints: [
+        { maxWidth: 520, x: -60, y: 20 },
+        { minWidth: 521, maxWidth: 800, x: -300, y: -10 },
+      ],
     },
   },
 ];

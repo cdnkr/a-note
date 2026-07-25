@@ -35,7 +35,7 @@ function applyShareColor(color: ShareColor): void {
 }
 
 function brand(): string {
-  return `<a class="brand" href="/" aria-label="a-note home">${brandIconMarkup("brand-mark")}<span>a-note</span></a>`;
+  return `<a class="brand" href="/" aria-label="A-Note home">${brandIconMarkup("brand-mark")}<span>A-Note</span></a>`;
 }
 
 function arrowIcon(): string {
@@ -59,7 +59,7 @@ function copyIcon(): string {
 }
 
 function renderLandingPage(root: HTMLElement): void {
-  document.title = "a-note — Feedback, in context";
+  document.title = "A-Note — Feedback, in context";
   root.classList.add("landing-page");
   root.innerHTML = `
     <header class="site-header shell">
@@ -75,7 +75,7 @@ function renderLandingPage(root: HTMLElement): void {
           <a class="button" id="landing-install-cta" href="${escapeAttribute(CHROME_STORE_URL)}">Use for free ${arrowIcon()}</a>
         </div>
 
-        <div class="product-stage" aria-label="a-note extension preview">
+        <div class="product-stage" aria-label="A-Note extension preview">
           <div class="demo-shell">
             <div class="browser-frame">
               <div class="browser-bar">
@@ -110,7 +110,7 @@ function renderLandingPage(root: HTMLElement): void {
     </main>
 
     <footer class="site-footer shell">
-      <span>© ${new Date().getFullYear()} a-note</span>
+      <span>© ${new Date().getFullYear()} A-Note</span>
     </footer>
   `;
   mountLandingDemo();
@@ -119,7 +119,7 @@ function renderLandingPage(root: HTMLElement): void {
 async function renderSharePage(root: HTMLElement): Promise<void> {
   root.classList.remove("landing-page");
   setNoIndex();
-  document.title = "Opening shared screenshot — a-note";
+  document.title = "Opening shared screenshot — A-Note";
   const shareId = shareIdFromPath(location.pathname);
   if (!shareId) {
     renderShareError(root, "That link doesn’t look right.", "Check the URL or ask the sender for a new share link.");
@@ -146,7 +146,7 @@ async function renderSharePage(root: HTMLElement): Promise<void> {
 }
 
 function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
-  document.title = "Shared screenshot — a-note";
+  document.title = "Shared screenshot — A-Note";
   const source = new URL(record.targetUrl);
   root.replaceChildren();
 
@@ -157,7 +157,7 @@ function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
   screenshot.className = "share-screenshot";
   const image = document.createElement("img");
   image.src = record.screenshotUrl;
-  image.alt = "Shared a-noted screenshot";
+  image.alt = "Shared A-Note screenshot";
   image.referrerPolicy = "no-referrer";
   image.addEventListener("error", () => {
     screenshot.classList.add("is-broken");
@@ -175,7 +175,7 @@ function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
     context.innerHTML = `
       <span>Shared with</span>
       ${brandIconMarkup("share-title-mark", pageColor.token)}
-    <span>a-note</span>
+    <span>A-Note</span>
   `;
   const iconActions = document.createElement("div");
   iconActions.className = "share-icon-actions";
@@ -218,7 +218,7 @@ function renderSharedScreenshot(root: HTMLElement, record: ShareRecord): void {
 
 function renderShareError(root: HTMLElement, title: string, copy: string): void {
   setNoIndex();
-  document.title = `${title} — a-note`;
+  document.title = `${title} — A-Note`;
   root.replaceChildren();
   const main = document.createElement("main");
   main.className = "share-error shell";
@@ -227,7 +227,7 @@ function renderShareError(root: HTMLElement, title: string, copy: string): void 
   heading.textContent = title;
   const paragraph = document.createElement("p");
   paragraph.textContent = copy;
-  main.append(heading, paragraph, actionLink("Back to a-note", "/", "button"));
+  main.append(heading, paragraph, actionLink("Back to A-Note", "/", "button"));
   root.append(main);
 }
 
@@ -280,7 +280,7 @@ async function copyShareUrl(input: HTMLInputElement, button: HTMLButtonElement):
 async function shareScreenshotPage(button: HTMLButtonElement): Promise<void> {
   const shareData = {
     title: document.title,
-    text: "Shared with a-note",
+    text: "Shared with A-Note",
     url: location.href,
   };
   try {

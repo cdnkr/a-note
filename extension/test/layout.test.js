@@ -13,6 +13,7 @@ const {
   connectorGeometry,
   expandRect,
   manualPositionMatchesViewport,
+  responsivePosition,
   setConnectorVisible,
 } = globalThis.ANoteLayout;
 delete globalThis.ANoteLayout;
@@ -70,6 +71,46 @@ test("manual positions only apply at the viewport width where they were saved", 
   assert.equal(manualPositionMatchesViewport(position, 1440), true);
   assert.equal(manualPositionMatchesViewport(position, 1280), false);
   assert.equal(manualPositionMatchesViewport({ left: 1, top: 2 }, 1440), false);
+});
+
+test("responsive positions use exactly one matching device range", () => {
+  const position = {
+    x: 240,
+    y: 40,
+    actionSide: "left",
+    breakpoints: [
+      { maxWidth: 520, x: 0, y: 56 },
+      { minWidth: 521, maxWidth: 800, x: 120, y: 30 },
+    ],
+  };
+
+  assert.deepEqual(
+    responsivePosition(position, 1024),
+    { x: 240, y: 40, actionSide: "left" },
+  );
+  assert.deepEqual(
+    responsivePosition(position, 700),
+    { x: 120, y: 30, actionSide: "left" },
+  );
+  assert.deepEqual(
+    responsivePosition(position, 390),
+    { x: 0, y: 56, actionSide: "left" },
+  );
+});
+
+test("responsive positions remain stable across repeated resolutions", () => {
+  const position = {
+    x: 10,
+    y: 20,
+    breakpoints: [
+      { minWidth: 521, maxWidth: 800, x: 30 },
+    ],
+  };
+
+  assert.deepEqual(responsivePosition(position, 900), { x: 10, y: 20 });
+  assert.deepEqual(responsivePosition(position, 700), { x: 30, y: 20 });
+  assert.deepEqual(responsivePosition(position, 700), { x: 30, y: 20 });
+  assert.deepEqual(responsivePosition(position, 500), { x: 10, y: 20 });
 });
 
 test("connector visibility toggles an SVG-compatible hidden attribute", () => {

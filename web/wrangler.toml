@@ -1,8 +1,11 @@
-name = "a-web"
+name = "a-note-web"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-15"
 
 [[r2_buckets]]
 binding = "SHARES"
-bucket_name = "a-shares"
-preview_bucket_name = "a-shares-preview"
+bucket_name = "a-note-shares"
+
+[vars]
+APP_ORIGIN = "https://a-note.online"
+ALLOWED_UPLOAD_ORIGINS = "https://a-note.online,chrome-extension://cbcgdblmocjpgbkbfcldokbbiebboenf"

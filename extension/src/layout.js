@@ -85,6 +85,27 @@
     );
   }
 
+  function responsivePosition(position, viewportWidth) {
+    if (!position) return null;
+
+    const { breakpoints, ...resolved } = position;
+    if (!Array.isArray(breakpoints)) return resolved;
+
+    const breakpoint = breakpoints.find((candidate) => {
+      if (!candidate) return false;
+      const aboveMinimum = !Number.isFinite(candidate.minWidth)
+        || viewportWidth >= candidate.minWidth;
+      const belowMaximum = !Number.isFinite(candidate.maxWidth)
+        || viewportWidth <= candidate.maxWidth;
+      return aboveMinimum && belowMaximum;
+    });
+
+    if (Number.isFinite(breakpoint?.x)) resolved.x = breakpoint.x;
+    if (Number.isFinite(breakpoint?.y)) resolved.y = breakpoint.y;
+
+    return resolved;
+  }
+
   function setConnectorVisible(connector, visible) {
     if (!connector) return;
     connector.toggleAttribute("hidden", !visible);
@@ -256,6 +277,7 @@
     connectorGeometry,
     expandRect,
     manualPositionMatchesViewport,
+    responsivePosition,
     setConnectorVisible,
   };
 });
