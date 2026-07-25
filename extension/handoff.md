@@ -20,15 +20,17 @@ The latest completed changes remove the separate composer and replace the ID-or-
 ## Established product behavior
 
 - Clicking the Chrome extension icon toggles the in-page UI directly; there is no popup.
-- The bottom-right toolbar slides in/out from the right and contains the colour-aware `A`, current-colour circle, annotation plus, viewport screenshot, and close-mode controls in that order.
+- The bottom-right toolbar slides in/out from the right and contains the colour-aware `A`, current-colour circle, element selector, text highlighter, viewport screenshot, and close-mode controls in that order.
 - The colour circle opens a top widget matching the screenshot preview styling. The active swatch has a dark border, and changing it updates handwritten note text, target/saved outlines, the colour indicator, and the `A` background immediately.
 - Active page annotations have transparent outlines with 5px breathing room and appear as background-free Excalifont text beside their DOM target. Comments resolving to the same element stack vertically.
 - Page comments, including manually positioned ones, reveal once per activation with a 50ms stagger. Offscreen comments reveal when they first enter the viewport; DOM re-renders do not replay annotations already revealed during that activation. All comments dismiss last-to-first before the host is hidden.
 - Each page note has compact neutral Share/Delete ghost controls in a horizontal pair immediately beside the text and mirrored to the edge farthest from the target. Below-target notes choose the roomier side.
-- The plus control toggles DOM-selection mode and uses a dark active state with a white plus. After an element is selected, it immediately returns to its inactive state.
+- The dashed-square pointer control toggles one-shot DOM-selection mode, while the highlighter control toggles one-shot text-selection mode with an I-beam cursor. The modes are mutually exclusive and share the same dark active state.
 - XPath generation prefers stable unique IDs and test attributes, semantic tags, conservative label/text anchors, and short paths from stable ancestors or siblings before using token-safe classes or an absolute fallback. Open Shadow DOM selection uses compound host/root paths, and SVG paths use namespace-safe node tests.
 - Selecting an element immediately creates and persists an empty inline annotation in edit mode. Inline text has an 80px minimum width only while editing, shrink-wraps when idle, supports up to 240 characters, and persists every input to `chrome.storage.local`.
 - Blur retains empty annotations so an element can be outlined without a label. Escape deletes an empty annotation and exits edit mode without deleting a non-empty one.
+- Releasing a non-empty light-DOM text selection stores a range target and paints it with a 24%-opacity version of the global colour through the CSS Custom Highlight API. Blank text annotations survive Escape, and clicking a saved highlight outside either selection mode creates another comment for the same range.
+- Text targets use a stable common-root XPath, UTF-16 text offsets, and exact/prefix/suffix quote context. Duplicate comments share one painted range; unresolved or ambiguous ranges remain stored and can recover after later DOM updates.
 - Every Note Share captures that note and highlight in their current colour and position, replaces the note's stored link, and opens the fixed preview. Viewport capture keeps all currently visible notes. Both upload immediately and expose Share, Download, Copy Link, and close controls.
 - Share pages always remain in the web app. Extension detection, original-page redirects, share import, and the missing-import rail have been removed.
 - Exact-URL local storage, unresolved annotations, and SPA route behavior are documented in `README.md` and implemented in `lib.js`/`content.js`.

@@ -8,14 +8,19 @@ const libPath = path.resolve(__dirname, "../src/lib.js");
 vm.runInThisContext(fs.readFileSync(libPath, "utf8"), { filename: libPath });
 const {
   MAX_CONTENT_LENGTH,
+  findTextQuoteOffset,
   isStableClass,
   isStableId,
   isShareColorToken,
   isShareId,
+  isTextTarget,
   pageUrl,
   resolveXPath,
+  resolveTextTarget,
   sharePageUrl,
   splitCompoundXPath,
+  textTargetForRange,
+  textTargetKey,
   withShareColor,
   xpathForElement,
   xpathLiteral,
@@ -127,6 +132,103 @@ test("compound XPath resolution traverses deterministic open shadow-root paths",
   );
 });
 
+test("text targets serialize and resolve exact multi-node selections", () => {
+  const rootRef = { current: null };
+  const doc = fakeTextDocument(rootRef);
+  const root = fakeTextElement("p", doc, [
+    fakeTextNode("Intro Hello ", doc),
+    fakeTextElement("strong", doc, [fakeTextNode("brave", doc)]),
+    fakeTextNode(" world Outro", doc),
+  ]);
+  rootRef.current = root;
+  doc.body = root;
+
+  const range = fakeTextRange(
+    root,
+    root.childNodes[0],
+    "Intro ".length,
+    root.childNodes[2],
+    " world".length,
+  );
+  const target = textTargetForRange(range);
+
+  assert.deepEqual(target, {
+    type: "text",
+    rootXPath: "/p[1]",
+    startOffset: 6,
+    endOffset: 23,
+    quote: {
+      exact: "Hello brave world",
+      prefix: "Intro ",
+      suffix: " Outro",
+    },
+  });
+  assert.equal(resolveTextTarget(target, doc).toString(), "Hello brave world");
+});
+
+test("text target quote fallback survives offset shifts and text-node wrappers", () => {
+  const context = "0123456789".repeat(4);
+  const rootRef = { current: null };
+  const doc = fakeTextDocument(rootRef);
+  const original = fakeTextElement("p", doc, [
+    fakeTextNode(`${context}Hello `, doc),
+    fakeTextElement("span", doc, [fakeTextNode("brave", doc)]),
+    fakeTextNode(" world", doc),
+  ]);
+  rootRef.current = original;
+  doc.body = original;
+  const target = textTargetForRange(fakeTextRange(
+    original,
+    original.childNodes[0],
+    context.length,
+    original.childNodes[2],
+    " world".length,
+  ));
+
+  const replacement = fakeTextElement("p", doc, [
+    fakeTextNode(`X${context}`, doc),
+    fakeTextElement("em", doc, [
+      fakeTextNode("Hello brave", doc),
+      fakeTextElement("span", doc, [fakeTextNode(" world", doc)]),
+    ]),
+  ]);
+  rootRef.current = replacement;
+  doc.body = replacement;
+
+  assert.equal(resolveTextTarget(target, doc).toString(), "Hello brave world");
+});
+
+test("text quote fallback rejects ambiguous matches", () => {
+  assert.equal(
+    findTextQuoteOffset(
+      "same text then same text",
+      { exact: "same text", prefix: "", suffix: "" },
+    ),
+    null,
+  );
+  assert.equal(
+    findTextQuoteOffset(
+      "left same text then right same text",
+      { exact: "same text", prefix: "left ", suffix: " then" },
+    ),
+    5,
+  );
+});
+
+test("text target keys group copied ranges without changing legacy annotations", () => {
+  const target = {
+    type: "text",
+    rootXPath: "//*[@id='copy']",
+    startOffset: 2,
+    endOffset: 6,
+    quote: { exact: "copy", prefix: "", suffix: "" },
+  };
+  assert.equal(isTextTarget(target), true);
+  assert.equal(textTargetKey(target), textTargetKey(structuredClone(target)));
+  assert.equal(isTextTarget({ id: "legacy", xpath: "/html[1]/body[1]" }), false);
+  assert.equal(textTargetKey({ xpath: "/html[1]/body[1]" }), "");
+});
+
 function fakeElement(localName, attributes = {}) {
   const entries = Object.entries(attributes);
   return {
@@ -145,6 +247,125 @@ function fakeElement(localName, attributes = {}) {
       return Object.hasOwn(attributes, name) ? attributes[name] : null;
     },
   };
+}
+
+function fakeTextNode(value, doc) {
+  return {
+    nodeType: 3,
+    nodeValue: value,
+    textContent: value,
+    childNodes: [],
+    parentElement: null,
+    parentNode: null,
+    ownerDocument: doc,
+    getRootNode() {
+      return doc;
+    },
+  };
+}
+
+function fakeTextElement(localName, doc, children = []) {
+  const element = fakeElement(localName);
+  element.ownerDocument = doc;
+  element.childNodes = children;
+  element.children = children.filter((child) => child.nodeType === 1);
+  element.getRootNode = () => doc;
+  children.forEach((child, index) => {
+    child.parentElement = element;
+    child.parentNode = element;
+    if (child.nodeType === 1) {
+      const previousElements = children
+        .slice(0, index)
+        .filter((candidate) => candidate.nodeType === 1);
+      child.previousElementSibling = previousElements.at(-1) || null;
+    }
+  });
+  Object.defineProperty(element, "textContent", {
+    configurable: true,
+    get() {
+      return flattenFakeTextNodes(element)
+        .map((node) => node.nodeValue)
+        .join("");
+    },
+  });
+  return element;
+}
+
+function fakeTextRange(root, startNode, startOffset, endNode, endOffset) {
+  return {
+    collapsed: startNode === endNode && startOffset === endOffset,
+    commonAncestorContainer: root,
+    startContainer: startNode,
+    startOffset,
+    endContainer: endNode,
+    endOffset,
+    toString() {
+      return fakeRangeString(root, startNode, startOffset, endNode, endOffset);
+    },
+  };
+}
+
+function fakeTextDocument(rootRef) {
+  const doc = {
+    nodeType: 9,
+    body: null,
+    evaluate(xpath, _scope, _resolver, resultType) {
+      const nodes = xpath === "/p[1]" && rootRef.current ? [rootRef.current] : [];
+      if (resultType === 9) return { singleNodeValue: nodes[0] || null };
+      return {
+        snapshotLength: nodes.length,
+        snapshotItem(index) {
+          return nodes[index] || null;
+        },
+      };
+    },
+    createRange() {
+      let startNode;
+      let startOffset;
+      let endNode;
+      let endOffset;
+      return {
+        setStart(node, offset) {
+          startNode = node;
+          startOffset = offset;
+        },
+        setEnd(node, offset) {
+          endNode = node;
+          endOffset = offset;
+        },
+        toString() {
+          return fakeRangeString(
+            rootRef.current,
+            startNode,
+            startOffset,
+            endNode,
+            endOffset,
+          );
+        },
+      };
+    },
+  };
+  return doc;
+}
+
+function fakeRangeString(root, startNode, startOffset, endNode, endOffset) {
+  const nodes = flattenFakeTextNodes(root);
+  let result = "";
+  let active = false;
+  for (const node of nodes) {
+    if (node === startNode) active = true;
+    if (!active) continue;
+    const start = node === startNode ? startOffset : 0;
+    const end = node === endNode ? endOffset : node.nodeValue.length;
+    result += node.nodeValue.slice(start, end);
+    if (node === endNode) break;
+  }
+  return result;
+}
+
+function flattenFakeTextNodes(root) {
+  if (root.nodeType === 3) return [root];
+  return root.childNodes.flatMap(flattenFakeTextNodes);
 }
 
 function fakeXPathDocument(matches) {

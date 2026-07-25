@@ -69,8 +69,8 @@ function renderLandingPage(root: HTMLElement): void {
 
     <main>
       <section class="hero shell">
-        <h1 id="landing-hero-title">Leave feedback where<br> it <span id="hero-title-anchor-word">matters</span></h1>
-        <p>Highlight any element, add a comment, and share the visual context in one simple link.</p>
+        <h1 id="landing-hero-title">Add notes in place, <br>on web <span id="hero-title-anchor-word">pages.</span></h1>
+        <p><span id="highlighted-text">Highlight text</span> or elements, add comments, and share them as screenshots.</p>
         <div class="hero-actions">
           <a class="button" id="landing-install-cta" href="${escapeAttribute(CHROME_STORE_URL)}">Use for free ${arrowIcon()}</a>
         </div>
@@ -90,11 +90,12 @@ function renderLandingPage(root: HTMLElement): void {
                 </div>
                 <div class="demo-copy">
                   <h2 id="landing-demo-title">We write it down.<br>You look brilliant.</h2>
-                  <p id="landing-demo-description">A professional note-taker comes to your desk, captures every thought, and never asks why it couldn’t be an email.</p>
+                  <p id="landing-demo-description">A profesional note-taker comes to your desk, captures every thoguht, and never aks why it couldn’t be an email.</p>
                   <button type="button" tabindex="-1">Send someone over</button>
                 </div>
                 <div class="demo-illustration">
                   <img
+                    id="landing-demo-image"
                     class="desk-scene"
                     src="/desk-scene.png"
                     alt="A professional note-taker writes at a desk while a smiling man relaxes in his chair."

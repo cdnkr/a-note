@@ -5,7 +5,9 @@ function renderLandingTargets(): void {
   document.body.innerHTML = `
     <h1 id="landing-hero-title">Leave feedback where it <span id="hero-title-anchor-word">matters</span></h1>
     <h2 id="landing-demo-title">We write it down. You look brilliant.</h2>
-    <p id="landing-demo-description">A professional note-taker comes to your desk, captures every thought, and never asks why it couldn’t be an email.</p>
+    <p id="landing-demo-description">A profesional note-taker comes to your desk, captures every thoguht, and never aks why it couldn’t be an email.</p>
+    <img id="landing-demo-image" alt="A professional note-taker at a desk">
+    <p><span id="highlighted-text">Highlight text</span> or elements.</p>
     <a id="landing-install-cta" href="#install">Use for free</a>
   `;
 }
@@ -29,27 +31,141 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     }),
   });
   renderLandingTargets();
+  Object.defineProperty(
+    document.querySelector("#landing-demo-image"),
+    "getBoundingClientRect",
+    {
+      configurable: true,
+      value: () => ({
+        left: 520,
+        top: 150,
+        right: 960,
+        bottom: 510,
+        width: 440,
+        height: 360,
+        x: 520,
+        y: 150,
+        toJSON: () => ({}),
+      }),
+    },
+  );
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: Range) {
+      const isDemoDescription = this.toString().startsWith("A profesional note-taker");
+      const top = isDemoDescription ? 200 : 100;
+      const width = isDemoDescription ? 305 : 80;
+      const height = isDemoDescription ? 28 : 20;
+      return {
+        left: 100,
+        top,
+        right: 100 + width,
+        bottom: top + height,
+        width,
+        height,
+        x: 100,
+        y: top,
+        toJSON: () => ({}),
+      };
+    },
+  });
+  const highlightRegistry = new Map<string, unknown>();
+  Object.defineProperty(globalThis, "Highlight", {
+    configurable: true,
+    value: class {
+      ranges: Range[];
+
+      constructor(...ranges: Range[]) {
+        this.ranges = ranges;
+      }
+    },
+  });
+  Object.defineProperty(globalThis, "CSS", {
+    configurable: true,
+    value: {
+      highlights: {
+        delete: (name: string) => highlightRegistry.delete(name),
+        set: (name: string, highlight: unknown) => highlightRegistry.set(name, highlight),
+      },
+    },
+  });
 
   const first = mountLandingDemo();
   await first.ready;
   await nextFrame();
 
-  expect(first.status()).toMatchObject({ active: true, count: 4 });
+  expect(first.status()).toMatchObject({ active: true, count: 6 });
   const firstHost = document.querySelector<HTMLElement>("#a-demo-root");
   const firstShadow = firstHost?.shadowRoot;
   expect(firstShadow).not.toBeNull();
   expect(
     [...firstShadow!.querySelectorAll(".page-comment-copy")].map((element) => element.textContent),
   ).toEqual(expect.arrayContaining([
+    "Like this!",
     "Like this",
-    "Use on any page",
-    "Click + to try it out on this page",
+    "Change this image",
+    "Fix these typos",
+    "Choose the element tool to try it on this page",
     "Simply add to Chrome and use anywhere",
   ]));
+  [
+    "landing-like-this",
+    "landing-change-image",
+    "landing-fix-typos",
+    "landing-add-button",
+    "landing-install",
+  ].forEach((id) => {
+    expect(
+      firstShadow!.querySelector(`[data-anchor="${id}"]`)?.getAttribute("data-placement"),
+    ).toBe("manual");
+  });
   expect(
-    [...firstShadow!.querySelectorAll(".annotation-stack")]
-      .every((element) => element.getAttribute("data-placement") === "manual"),
-  ).toBe(true);
+    firstShadow!.querySelector('[data-anchor="landing-highlight-text"]')
+      ?.getAttribute("data-placement"),
+  ).not.toBe("manual");
+  expect(firstShadow!.querySelector('[data-highlight="landing-highlight-text"]')).toBeNull();
+  const imageComment = firstShadow!.querySelector<HTMLElement>(
+    '[data-anchor="landing-change-image"]',
+  );
+  Object.defineProperty(imageComment, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      left: 0,
+      top: 0,
+      right: 160,
+      bottom: 24,
+      width: 160,
+      height: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  });
+  window.dispatchEvent(new Event("resize"));
+  expect(imageComment?.style.left).toBe("327px");
+  expect(imageComment?.style.top).toBe("200px");
+  expect(imageComment?.dataset.actionSide).toBe("left");
+  expect(firstShadow!.querySelector<HTMLElement>(
+    '[data-highlight="landing-change-image"]',
+  )?.style).toMatchObject({
+    left: "515px",
+    top: "145px",
+    width: "450px",
+    height: "370px",
+  });
+  const typoComment = firstShadow!.querySelector<HTMLElement>(
+    '[data-anchor="landing-fix-typos"]',
+  );
+  expect(typoComment?.style.left).toBe("339px");
+  expect(typoComment?.style.top).toBe("240px");
+  const textHighlight = highlightRegistry.get("a-demo-root-text") as
+    | { ranges: Range[] }
+    | undefined;
+  expect(textHighlight?.ranges).toHaveLength(2);
+  expect(textHighlight?.ranges.map((range) => range.toString())).toEqual(expect.arrayContaining([
+    "Highlight text",
+    "A profesional note-taker comes to your desk, captures every thoguht, and never aks why it couldn’t be an email.",
+  ]));
 
   const viewportCapture = firstShadow!.querySelector<HTMLButtonElement>(".screenshot-button");
   const noteCapture = firstShadow!.querySelector<HTMLButtonElement>(
@@ -90,10 +206,10 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     value: 500,
   });
   window.dispatchEvent(new Event("resize"));
-  expect(responsiveSample?.style.left).toBe("15px");
-  expect(responsiveSample?.style.top).toBe("51px");
-  expect(sample?.style.left).toBe("15px");
-  expect(sample?.style.top).toBe("-285px");
+  expect(responsiveSample?.style.left).toBe("-65px");
+  expect(responsiveSample?.style.top).toBe("-211px");
+  expect(sample?.style.left).toBe("45px");
+  expect(sample?.style.top).toBe("-5px");
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
     value: 700,
@@ -108,10 +224,10 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     value: 500,
   });
   window.dispatchEvent(new Event("resize"));
-  expect(responsiveSample?.style.left).toBe("15px");
-  expect(responsiveSample?.style.top).toBe("51px");
-  expect(sample?.style.left).toBe("15px");
-  expect(sample?.style.top).toBe("-285px");
+  expect(responsiveSample?.style.left).toBe("-65px");
+  expect(responsiveSample?.style.top).toBe("-211px");
+  expect(sample?.style.left).toBe("45px");
+  expect(sample?.style.top).toBe("-5px");
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
     value: 1024,
@@ -171,13 +287,13 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     '[data-page-delete="landing-like-this"]',
   )?.click();
   await Promise.resolve();
-  expect(first.status().count).toBe(3);
+  expect(first.status().count).toBe(5);
 
   firstHost?.remove();
   renderLandingTargets();
   const reloaded = mountLandingDemo();
   await reloaded.ready;
-  expect(reloaded.status()).toMatchObject({ active: true, count: 4 });
+  expect(reloaded.status()).toMatchObject({ active: true, count: 6 });
   expect(
     document.querySelector<HTMLElement>("#a-demo-root")
       ?.style.getPropertyValue("--annotation-color"),

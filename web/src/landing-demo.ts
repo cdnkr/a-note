@@ -13,10 +13,11 @@ import excalifontMarksUrl from "../../extension/public/fonts/Excalifont-Regular-
 
 type AnnotationSeed = {
   id: string;
+  kind?: "element" | "text";
   root: "document" | "widget";
   selector: string;
   content: string;
-  position: {
+  position?: {
     x?: number;
     y?: number;
     actionSide?: "left" | "right";
@@ -68,13 +69,24 @@ const fontAssets: Record<string, string> = {
 
 const seeds: AnnotationSeed[] = [
   {
+    id: "landing-highlight-text",
+    kind: "text",
+    root: "document",
+    selector: "#highlighted-text",
+    content: "Like this!",
+    position: {
+      x: -300,
+      y: 10
+    },
+  },
+  {
     id: "landing-like-this",
     root: "document",
     selector: "#hero-title-anchor-word",
     content: "Like this",
     position: {
       y: 40,
-      x: 240,
+      x: 200,
       breakpoints: [
         { maxWidth: 520, x: -80, y: -206 },
         { minWidth: 521, maxWidth: 800, x: 40, y: 30 },
@@ -82,35 +94,44 @@ const seeds: AnnotationSeed[] = [
     },
   },
   {
-    id: "landing-use-any-page",
+    id: "landing-change-image",
     root: "document",
-    selector: "#landing-demo-title",
-    content: "Use on any page",
+    selector: "#landing-demo-image",
+    content: "Change this image",
     position: {
-      y: -100,
-      x: -200,
+      x: -740,
+      y: 35,
+      actionSide: "left",
       breakpoints: [
-        { maxWidth: 520, x: -60, y: -40 },
-        { minWidth: 521, maxWidth: 800, x: -120, y: -80 },
+        { maxWidth: 520, x: -10, y: 40 },
+        { minWidth: 521, maxWidth: 800, x: -15, y: 48 },
       ],
     },
   },
-  // {
-  //   id: "landing-leave-note",
-  //   root: "document",
-  //   selector: "#landing-demo-description",
-  //   content: "Highlight the element and simply leave a note",
-  //   position: {
-  //     y: 14,
-  //   },
-  // },
+  {
+    id: "landing-fix-typos",
+    kind: "text",
+    root: "document",
+    selector: "#landing-demo-description",
+    content: "Fix these typos",
+    position: {
+      // Pull the note back over roughly the final quarter of the highlighted line.
+      x: -120,
+      y: 60,
+      actionSide: "right",
+      breakpoints: [
+        { maxWidth: 520, x: -40, y: 36 },
+        { minWidth: 521, maxWidth: 800, x: -60, y: 40 },
+      ],
+    },
+  },
   {
     id: "landing-add-button",
     root: "widget",
     selector: ".start-button",
-    content: "Click + to try it out on this page",
+    content: "Try it on this page",
     position: {
-      y: -350,
+      y: -380,
       actionSide: "left",
       pagePinned: true,
       breakpoints: [
@@ -123,7 +144,7 @@ const seeds: AnnotationSeed[] = [
     id: "landing-install",
     root: "document",
     selector: "#landing-install-cta",
-    content: "Simply add to Chrome and use anywhere",
+    content: "Simply add to Chrome\nand use on any page",
     position: {
       y: -10,
       x: -680,

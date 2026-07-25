@@ -5,8 +5,12 @@
 
   const {
     MAX_CONTENT_LENGTH,
+    isTextTarget,
     pageUrl,
+    resolveTextTarget,
     resolveXPath,
+    textTargetForRange,
+    textTargetKey,
     xpathForElement,
   } = globalThis.ANoteLib;
   const {
@@ -25,6 +29,7 @@
   } = globalThis.ANoteBrand;
 
   const DRAG_THRESHOLD = 3;
+  const TEXT_HIGHLIGHT_ALPHA = 0.24;
   const EXCALIFONT_SUBSETS = [
     {
       file: "Excalifont-Regular-a88b72a24fb54c9f94e3b5fdaa7481c9.woff2",
@@ -64,7 +69,7 @@
     const state = {
     annotations: [],
     active: false,
-    annotating: false,
+    selectionMode: null,
     sharingIds: new Set(),
     capturing: false,
     preview: null,
@@ -73,11 +78,20 @@
     manualPositions: new Map(),
     dragging: null,
     revealedAnnotationIds: new Set(),
+    resolvedTextRanges: new Map(),
+    textRangeKeys: new Map(),
+    textHighlight: null,
+    textSelectionPending: false,
     pendingSeeds: Array.isArray(options.seeds) ? [...options.seeds] : [],
     };
 
     let pageKey = pageUrl(location.href);
     const captureAvailable = typeof environment.capture === "function";
+    const textHighlightAvailable = Boolean(
+      globalThis.CSS?.highlights
+      && typeof globalThis.Highlight === "function",
+    );
+    const textHighlightName = `${hostId.replace(/[^a-z0-9_-]+/gi, "-")}-text`;
     const launcherEnabled = Boolean(options.launcher);
     const seedPositions = new Map(
       (Array.isArray(options.seeds) ? options.seeds : [])
@@ -94,7 +108,7 @@
     const shadow = host.attachShadow({ mode: "open" });
     document.documentElement.append(host);
     const pageStyle = document.createElement("style");
-    pageStyle.textContent = "html.a-is-selecting, html.a-is-selecting * { cursor: crosshair !important; }";
+    updatePageStyle(colorById(DEFAULT_COLOR_ID));
     document.documentElement.append(pageStyle);
 
     shadow.innerHTML = `
@@ -127,8 +141,11 @@
       <div class="toolbar">
         <img class="brand-mark" src="${assetUrl(svgPath(DEFAULT_COLOR_ID))}" alt="" aria-hidden="true">
         <button class="color-button has-tooltip" type="button" aria-label="Choose annotation colour" aria-expanded="false"></button>
-        <button class="toolbar-action start-button has-tooltip" type="button" aria-label="Add annotation" aria-pressed="false">
-          ${icon("plus")}
+        <button class="toolbar-action start-button has-tooltip" type="button" aria-label="Select an element to annotate" aria-pressed="false">
+          ${icon("element-select")}
+        </button>
+        <button class="toolbar-action highlighter-button has-tooltip${textHighlightAvailable ? "" : " is-unavailable"}" type="button" aria-label="${textHighlightAvailable ? "Highlight text" : "Highlight text — unavailable in this browser"}" aria-pressed="false" ${textHighlightAvailable ? "" : "disabled"}>
+          ${icon("highlighter")}
         </button>
         <button class="toolbar-action screenshot-button has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" aria-label="${captureAvailable ? "Capture viewport" : "Capture viewport — available in the Chrome extension"}" ${captureAvailable ? "" : "disabled"}>
           ${icon("screenshot")}
@@ -152,6 +169,7 @@
     screenshotButton: shadow.querySelector(".screenshot-button"),
     closeMode: shadow.querySelector(".close-mode"),
     startButton: shadow.querySelector(".start-button"),
+    highlighterButton: shadow.querySelector(".highlighter-button"),
     preview: shadow.querySelector(".capture-preview"),
     previewImage: shadow.querySelector(".preview-image"),
     previewClose: shadow.querySelector(".preview-close"),
@@ -216,17 +234,33 @@
             unresolved.push(seed);
             return;
           }
-          const xpath = xpathForElement(target);
-          if (!xpath) {
-            unresolved.push(seed);
-            return;
-          }
-          state.annotations.push({
+          const annotation = {
             id: seed.id,
-            xpath,
             content: String(seed.content || "").slice(0, MAX_CONTENT_LENGTH),
             createdAt: seed.createdAt || "2026-01-01T00:00:00.000Z",
-          });
+          };
+          if (seed.kind === "text") {
+            if (seed.root !== "document") {
+              unresolved.push(seed);
+              return;
+            }
+            const range = document.createRange();
+            range.selectNodeContents(target);
+            const textTarget = textTargetForRange(range);
+            if (!textTarget) {
+              unresolved.push(seed);
+              return;
+            }
+            annotation.target = textTarget;
+          } else {
+            const xpath = xpathForElement(target);
+            if (!xpath) {
+              unresolved.push(seed);
+              return;
+            }
+            annotation.xpath = xpath;
+          }
+          state.annotations.push(annotation);
           progressed = true;
           render();
         });
@@ -238,7 +272,14 @@
     ui.closeMode.addEventListener("click", () => setActive(false));
     if (captureAvailable) ui.screenshotButton.addEventListener("click", captureViewportShare);
     if (launcherEnabled) ui.launcher.addEventListener("click", () => setActive(true));
-    ui.startButton.addEventListener("click", () => setAnnotating(!state.annotating));
+    ui.startButton.addEventListener("click", () => {
+      setSelectionMode(state.selectionMode === "element" ? null : "element");
+    });
+    if (textHighlightAvailable) {
+      ui.highlighterButton.addEventListener("click", () => {
+        setSelectionMode(state.selectionMode === "text" ? null : "text");
+      });
+    }
     ui.previewClose.addEventListener("click", closePreview);
     ui.previewShare.addEventListener("click", sharePreview);
     ui.previewDownload.addEventListener("click", downloadPreview);
@@ -259,13 +300,14 @@
     ui.pins.addEventListener("keydown", handleAnnotationEditKeydown);
     ui.pins.addEventListener("focusout", finishAnnotationEdit);
     document.addEventListener("pointermove", onPointerMove, true);
+    document.addEventListener("pointerup", onTextPointerUp, true);
     document.addEventListener("click", onPageClick, true);
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       if (state.colorPickerOpen) {
         setColorPickerOpen(false);
-      } else if (state.annotating) {
-        setAnnotating(false);
+      } else if (state.selectionMode) {
+        setSelectionMode(null);
       }
     }, true);
     window.addEventListener("scroll", positionAnchoredUi, { passive: true });
@@ -289,15 +331,16 @@
     state.revealedAnnotationIds.clear();
     closePreview();
     setColorPickerOpen(false);
-    setAnnotating(false);
+    setSelectionMode(null);
     render();
   }
 
   function refreshResolvedTargets() {
     if (!state.active) return;
     if (state.pendingSeeds.length) resolvePendingSeeds();
+    refreshTextHighlights();
     const expected = state.annotations
-      .filter((annotation) => resolveElement(annotation.xpath))
+      .filter((annotation) => resolveAnnotationTarget(annotation))
       .length;
     const rendered = ui.pins.querySelectorAll(".annotation-stack").length;
     if (expected !== rendered) {
@@ -318,7 +361,8 @@
     }
     if (!active) {
       finishAnnotationDrag();
-      setAnnotating(false);
+      setSelectionMode(null);
+      refreshTextHighlights();
       closePreview();
       setColorPickerOpen(false);
       ui.dock.classList.remove("is-visible");
@@ -372,49 +416,145 @@
     return (comments.length - 1) * 50 + 220;
   }
 
-  function setAnnotating(active) {
-    state.annotating = active;
-    document.documentElement.classList.toggle("a-is-selecting", active);
-    ui.startButton.classList.toggle("is-active", active);
-    ui.startButton.setAttribute("aria-pressed", String(active));
-    ui.startButton.setAttribute("aria-label", active ? "Stop adding annotations" : "Add annotation");
+  function setSelectionMode(mode) {
+    const nextMode = mode === "element" || (mode === "text" && textHighlightAvailable)
+      ? mode
+      : null;
+    state.selectionMode = nextMode;
+    state.textSelectionPending = false;
+    document.documentElement.classList.toggle(
+      "a-is-selecting-element",
+      nextMode === "element",
+    );
+    document.documentElement.classList.toggle(
+      "a-is-selecting-text",
+      nextMode === "text",
+    );
+    ui.startButton.classList.toggle("is-active", nextMode === "element");
+    ui.startButton.setAttribute("aria-pressed", String(nextMode === "element"));
+    ui.startButton.setAttribute(
+      "aria-label",
+      nextMode === "element"
+        ? "Stop selecting elements"
+        : "Select an element to annotate",
+    );
+    ui.highlighterButton.classList.toggle("is-active", nextMode === "text");
+    ui.highlighterButton.setAttribute("aria-pressed", String(nextMode === "text"));
+    ui.highlighterButton.setAttribute(
+      "aria-label",
+      !textHighlightAvailable
+        ? "Highlight text — unavailable in this browser"
+        : nextMode === "text"
+          ? "Stop highlighting text"
+          : "Highlight text",
+    );
     ui.outline.style.display = "none";
-    if (active) {
+    if (nextMode === "element") {
       showToast("Select an element to annotate");
+    } else if (nextMode === "text") {
+      showToast("Select text to highlight");
     }
   }
 
   function onPointerMove(event) {
-    if (!state.annotating || isExtensionUi(event)) return;
+    if (state.selectionMode !== "element" || isExtensionUi(event)) return;
     const target = selectableEventTarget(event);
     if (!target) return;
     positionTargetOutline(target.getBoundingClientRect());
   }
 
-  function onPageClick(event) {
-    if (!state.annotating || isExtensionUi(event)) return;
-    const target = selectableEventTarget(event);
-    if (!target) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    createAnnotation(target);
+  function onTextPointerUp(event) {
+    if (
+      state.selectionMode !== "text"
+      || state.textSelectionPending
+      || isExtensionUi(event)
+    ) {
+      return;
+    }
+    state.textSelectionPending = true;
+    requestAnimationFrame(() => {
+      state.textSelectionPending = false;
+      if (state.selectionMode !== "text") return;
+      completeTextSelection();
+    });
   }
 
-  function createAnnotation(target) {
+  function completeTextSelection() {
+    const selection = window.getSelection?.();
+    if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return;
+    const sourceRange = selection.getRangeAt(0);
+    const range = sourceRange.cloneRange?.() || sourceRange;
+    const target = textTargetForRange(range);
+    if (!target) {
+      showToast("Select ordinary page text to highlight");
+      return;
+    }
+    selection.removeAllRanges();
+    createTextAnnotation(target);
+  }
+
+  function onPageClick(event) {
+    if (!state.active || isExtensionUi(event)) return;
+    if (state.selectionMode === "text") return;
+    if (state.selectionMode === "element") {
+      const target = selectableEventTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      createElementAnnotation(target);
+      return;
+    }
+
+    const textTarget = textTargetAtPoint(event.clientX, event.clientY);
+    if (!textTarget) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    createTextAnnotation(textTarget);
+  }
+
+  function createElementAnnotation(target) {
     const annotation = {
       id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
       xpath: xpathForElement(target),
       content: "",
       createdAt: new Date().toISOString(),
     };
+    addAnnotation(annotation);
+  }
+
+  function createTextAnnotation(target) {
+    const annotation = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      target: cloneTextTarget(target),
+      content: "",
+      createdAt: new Date().toISOString(),
+    };
+    addAnnotation(annotation);
+  }
+
+  function addAnnotation(annotation) {
     state.annotations.push(annotation);
-    setAnnotating(false);
+    setSelectionMode(null);
     render();
     const copy = ui.pins.querySelector(
       `[data-page-comment="${cssEscape(annotation.id)}"] .page-comment-copy`,
     );
     if (copy) startAnnotationEdit(copy);
     saveAnnotations().catch(() => showToast("Could not save annotation"));
+  }
+
+  function cloneTextTarget(target) {
+    return {
+      type: "text",
+      rootXPath: target.rootXPath,
+      startOffset: target.startOffset,
+      endOffset: target.endOffset,
+      quote: {
+        exact: target.quote.exact,
+        prefix: target.quote.prefix,
+        suffix: target.quote.suffix,
+      },
+    };
   }
 
   function startAnnotationDrag(event) {
@@ -543,7 +683,7 @@
     event.preventDefault();
     event.stopPropagation();
     copy.blur();
-    if (annotation?.content === "") {
+    if (annotation?.content === "" && !isTextTarget(annotation.target)) {
       deleteAnnotation(annotation.id);
     }
   }
@@ -600,6 +740,46 @@
     )) || null;
   }
 
+  function textTargetAtPoint(clientX, clientY) {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const hitKeys = new Set();
+    if (typeof globalThis.CSS?.highlights?.highlightsFromPoint === "function") {
+      try {
+        const hits = globalThis.CSS.highlights.highlightsFromPoint(clientX, clientY);
+        hits.forEach((hit) => {
+          if (hit.highlight !== state.textHighlight) return;
+          hit.ranges.forEach((range) => {
+            const key = state.textRangeKeys.get(range);
+            if (key) hitKeys.add(key);
+          });
+        });
+      } catch (_error) {
+        // Fall through to range rectangle hit testing.
+      }
+    }
+    if (!hitKeys.size) {
+      state.resolvedTextRanges.forEach((range, key) => {
+        if (rangeContainsPoint(range, clientX, clientY)) hitKeys.add(key);
+      });
+    }
+    if (!hitKeys.size) return null;
+
+    for (let index = state.annotations.length - 1; index >= 0; index -= 1) {
+      const target = state.annotations[index]?.target;
+      if (isTextTarget(target) && hitKeys.has(textTargetKey(target))) return target;
+    }
+    return null;
+  }
+
+  function rangeContainsPoint(range, clientX, clientY) {
+    return Array.from(range?.getClientRects?.() || []).some((rect) => (
+      clientX >= rect.left
+      && clientX <= rect.right
+      && clientY >= rect.top
+      && clientY <= rect.bottom
+    ));
+  }
+
   async function deleteAnnotation(id) {
     state.annotations = state.annotations.filter((item) => item.id !== id);
     state.manualPositions.delete(id);
@@ -612,16 +792,16 @@
 
   async function shareAnnotation(annotation) {
     if (!captureAvailable || !annotation || state.capturing || state.sharingIds.has(annotation.id)) return;
-    const element = resolveElement(annotation.xpath);
-    if (!element) {
-      showToast("Element not found — screenshot unavailable");
+    const target = resolveAnnotationTarget(annotation);
+    if (!target) {
+      showToast("Annotation target not found — screenshot unavailable");
       return;
     }
 
     state.sharingIds.add(annotation.id);
     setPageShareButtonState(annotation.id, true);
     try {
-      await enterNoteCaptureMode(element, annotation.id);
+      await enterNoteCaptureMode(target, annotation.id);
       const response = await createScreenshotShare();
       if (!response?.ok || !response.share?.shareUrl) {
         if (response?.screenshotDataUrl) {
@@ -682,7 +862,7 @@
     button.setAttribute("aria-busy", String(sharing));
   }
 
-  async function enterNoteCaptureMode(element, annotationId) {
+  async function enterNoteCaptureMode(target, annotationId) {
     setCaptureBusy(true);
     clearCaptureTargets();
     const comment = ui.pins.querySelector(`[data-page-comment="${cssEscape(annotationId)}"]`);
@@ -693,21 +873,31 @@
     stack?.classList.add("is-capture-target");
     connector?.classList.add("is-capture-target");
     host.classList.add("is-capturing", "is-capturing-note");
+    if (target.type === "text") {
+      host.classList.add("is-capturing-text-note");
+      refreshTextHighlights(target.key);
+    } else {
+      clearTextHighlights();
+    }
     positionPins();
     await waitForCaptureFade();
 
-    const rect = expandRect(element.getBoundingClientRect());
+    let rect = targetRect(target);
     const commentRect = comment?.getBoundingClientRect();
     const margin = 12;
     if (!isCaptureRectVisible(rect, margin) || !isCaptureRectVisible(commentRect, margin)) {
-      element.scrollIntoView({ behavior: "auto", block: "center", inline: "center" });
+      scrollTargetIntoView(target);
       await nextPaint();
       positionPins();
       await nextPaint();
+      rect = targetRect(target);
     }
 
-    const captureRect = element.getBoundingClientRect();
-    positionTargetOutline(captureRect);
+    if (target.type === "element") {
+      positionTargetOutline(target.element.getBoundingClientRect());
+    } else {
+      ui.outline.style.display = "none";
+    }
     await nextPaint();
   }
 
@@ -721,10 +911,16 @@
   }
 
   function exitCaptureMode() {
-    host.classList.remove("is-capturing", "is-capturing-note", "is-capturing-viewport");
+    host.classList.remove(
+      "is-capturing",
+      "is-capturing-note",
+      "is-capturing-text-note",
+      "is-capturing-viewport",
+    );
     clearCaptureTargets();
     setCaptureBusy(false);
     ui.outline.style.display = "none";
+    refreshTextHighlights();
     positionAnchoredUi();
   }
 
@@ -734,6 +930,7 @@
     ui.screenshotButton.setAttribute("aria-busy", String(busy));
     ui.colorButton.disabled = busy;
     ui.startButton.disabled = busy;
+    ui.highlighterButton.disabled = !textHighlightAvailable || busy;
     ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
       button.disabled = !captureAvailable || busy || state.sharingIds.has(button.dataset.pageShare);
     });
@@ -792,6 +989,7 @@
     ui.launcherMark.src = assetUrl(svgPath(color.id));
     ui.colorButton.style.backgroundColor = color.value;
     ui.colorButton.setAttribute("aria-label", "Choose annotation colour");
+    updatePageStyle(color);
     ui.colorGrid.querySelectorAll("[data-color-id]").forEach((button) => {
       const active = button.dataset.colorId === color.id;
       button.classList.toggle("is-active", active);
@@ -910,19 +1108,148 @@
     return resolveXPath(xpath, document);
   }
 
+  function resolveAnnotationTarget(annotation) {
+    if (!annotation) return null;
+    if (isTextTarget(annotation.target)) {
+      const key = textTargetKey(annotation.target);
+      const range = state.resolvedTextRanges.get(key)
+        || resolveTextTarget(annotation.target, document);
+      if (!key || !range) return null;
+      return {
+        type: "text",
+        key,
+        groupKey: `text:${key}`,
+        range,
+      };
+    }
+
+    const element = resolveElement(annotation.xpath);
+    return element
+      ? {
+          type: "element",
+          key: annotation.xpath,
+          groupKey: element,
+          element,
+        }
+      : null;
+  }
+
+  function refreshTextHighlights(onlyTargetKey = null) {
+    if (!textHighlightAvailable || !state.active) {
+      clearTextHighlights();
+      return;
+    }
+
+    const targets = new Map();
+    state.annotations.forEach((annotation) => {
+      if (!isTextTarget(annotation.target)) return;
+      const key = textTargetKey(annotation.target);
+      if (
+        !key
+        || (onlyTargetKey && key !== onlyTargetKey)
+        || targets.has(key)
+      ) {
+        return;
+      }
+      targets.set(key, annotation.target);
+    });
+
+    const ranges = [];
+    const resolvedTextRanges = new Map();
+    const textRangeKeys = new Map();
+    targets.forEach((target, key) => {
+      const range = resolveTextTarget(target, document);
+      if (!range) return;
+      ranges.push(range);
+      resolvedTextRanges.set(key, range);
+      textRangeKeys.set(range, key);
+    });
+    if (!ranges.length) {
+      clearTextHighlights();
+      return;
+    }
+
+    try {
+      const highlight = new globalThis.Highlight(...ranges);
+      globalThis.CSS.highlights.set(textHighlightName, highlight);
+      state.textHighlight = highlight;
+      state.resolvedTextRanges = resolvedTextRanges;
+      state.textRangeKeys = textRangeKeys;
+    } catch (_error) {
+      clearTextHighlights();
+    }
+  }
+
+  function clearTextHighlights() {
+    if (textHighlightAvailable) {
+      globalThis.CSS.highlights.delete(textHighlightName);
+    }
+    state.textHighlight = null;
+    state.resolvedTextRanges.clear();
+    state.textRangeKeys.clear();
+  }
+
+  function targetRect(target) {
+    if (target.type === "element") {
+      return expandRect(target.element.getBoundingClientRect());
+    }
+    const rect = target.range.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function scrollTargetIntoView(target) {
+    if (target.type === "element") {
+      target.element.scrollIntoView({ behavior: "auto", block: "center", inline: "center" });
+      return;
+    }
+    const startNode = target.range.startContainer;
+    const startElement = startNode?.nodeType === 1 ? startNode : startNode?.parentElement;
+    startElement?.scrollIntoView?.({ behavior: "auto", block: "center", inline: "center" });
+  }
+
+  function updatePageStyle(color) {
+    pageStyle.textContent = `
+      html.a-is-selecting-element,
+      html.a-is-selecting-element * {
+        cursor: crosshair !important;
+      }
+      html.a-is-selecting-text,
+      html.a-is-selecting-text * {
+        cursor: text !important;
+      }
+      ::highlight(${textHighlightName}) {
+        background-color: ${transparentHighlightColor(color.value)} !important;
+      }
+    `;
+  }
+
+  function transparentHighlightColor(value) {
+    const match = String(value || "").match(/^#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i);
+    if (!match) return `rgba(64, 92, 245, ${TEXT_HIGHLIGHT_ALPHA})`;
+    return `rgba(${Number.parseInt(match[1], 16)}, ${Number.parseInt(match[2], 16)}, ${Number.parseInt(match[3], 16)}, ${TEXT_HIGHLIGHT_ALPHA})`;
+  }
+
   function render() {
+    refreshTextHighlights();
     renderPins();
   }
 
   function renderPins() {
     finishAnnotationDrag();
     ui.pins.innerHTML = state.annotations.map((annotation) => {
-      const element = resolveElement(annotation.xpath);
-      if (!element) return "";
+      const target = resolveAnnotationTarget(annotation);
+      if (!target) return "";
       const sharing = state.sharingIds.has(annotation.id);
       return `
         <svg class="annotation-connector" data-connector="${escapeHtml(annotation.id)}" aria-hidden="true"><path></path></svg>
-        <div class="element-highlight" data-highlight="${escapeHtml(annotation.id)}" aria-hidden="true"></div>
+        ${target.type === "element" ? `<div class="element-highlight" data-highlight="${escapeHtml(annotation.id)}" aria-hidden="true"></div>` : ""}
         <div class="annotation-stack" data-anchor="${escapeHtml(annotation.id)}">
         <div class="page-comment-row">
           <article class="page-comment" data-page-comment="${escapeHtml(annotation.id)}">
@@ -973,18 +1300,19 @@
     const automaticOffsets = new Map();
     ui.pins.querySelectorAll(".annotation-stack").forEach((stack) => {
       const annotation = findAnnotation(stack.dataset.anchor);
-      const element = annotation && resolveElement(annotation.xpath);
+      const target = annotation && resolveAnnotationTarget(annotation);
       const highlight = ui.pins.querySelector(`[data-highlight="${cssEscape(stack.dataset.anchor)}"]`);
       const connector = ui.pins.querySelector(`[data-connector="${cssEscape(stack.dataset.anchor)}"]`);
-      if (!element) {
+      if (!target) {
         stack.hidden = true;
         if (highlight) highlight.hidden = true;
         setConnectorVisible(connector, false);
         return;
       }
-      const rect = element.getBoundingClientRect();
-      const outlineRect = expandRect(rect);
-      const targetHidden = Boolean(element.closest?.("[hidden]"));
+      const outlineRect = targetRect(target);
+      const targetHidden = target.type === "element"
+        ? Boolean(target.element.closest?.("[hidden]"))
+        : outlineRect.width <= 0 || outlineRect.height <= 0;
       const outsideViewport = targetHidden
         || outlineRect.bottom < 0
         || outlineRect.top > window.innerHeight
@@ -1047,9 +1375,9 @@
 
       stack.classList.remove("is-manual");
       setConnectorVisible(connector, false);
-      const offset = automaticOffsets.get(element) || 0;
+      const offset = automaticOffsets.get(target.groupKey) || 0;
       placement.top += offset;
-      automaticOffsets.set(element, offset + stack.offsetHeight + 7);
+      automaticOffsets.set(target.groupKey, offset + stack.offsetHeight + 7);
       stack.dataset.placement = placement.placement;
       stack.dataset.actionSide = placement.actionSide;
       stack.style.left = `${placement.left}px`;
@@ -1200,12 +1528,13 @@
   function icon(name) {
     const icons = {
       spark: '<svg viewBox="0 0 24 24"><path d="M12 2l1.55 5.45L19 9l-5.45 1.55L12 16l-1.55-5.45L5 9l5.45-1.55L12 2Z"/><path d="m18.5 14 .8 2.7 2.7.8-2.7.8-.8 2.7-.8-2.7-2.7-.8 2.7-.8.8-2.7Z"/></svg>',
-      plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-      close: '<svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>',
-      up: '<svg viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>',
+      "element-select": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-square-dashed-mouse-pointer-icon lucide-square-dashed-mouse-pointer"><path d="M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z"/><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h2"/><path d="M14 3h1"/><path d="M3 9v1"/><path d="M21 9v2"/><path d="M3 14v1"/></svg>',
+      highlighter: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-highlighter-icon lucide-highlighter"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>',
+      close: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x-icon lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+      "arrow-right": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-right-icon lucide-arrow-right"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>',
       link: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/></svg>',
       share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4m-7.6 6.8 7.6 4.4"/></svg>',
-      screenshot: '<svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2m8 0h2a2 2 0 0 1 2 2v2m0 8v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><rect x="7" y="8" width="10" height="8" rx="2"/><circle cx="12" cy="12" r="2"/></svg>',
+      screenshot: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-fullscreen-icon lucide-fullscreen"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect width="10" height="8" x="7" y="8" rx="1"/></svg>',
       download: '<svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg>',
       copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
       warning: '<svg viewBox="0 0 24 24"><path d="m12 3 9 17H3L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg>',
@@ -1255,8 +1584,8 @@
       .color-button:hover:not(:disabled) { transform: scale(1.04); box-shadow: 0 0 0 2px rgba(17,26,46,.18), 0 6px 13px rgba(17,26,46,.15); }
       .color-button:focus-visible, .color-button.is-active { outline: none; box-shadow: 0 0 0 3px var(--snow), 0 0 0 5px var(--navy); }
       .color-button:disabled { opacity: .48; cursor: wait; }
-      .start-button.is-active { background: var(--navy); color: var(--snow); box-shadow: 0 5px 12px rgba(17,26,46,.22); }
-      .start-button.is-active:hover:not(:disabled) { background: #050a15; color: var(--snow); }
+      .start-button.is-active, .highlighter-button.is-active { background: var(--navy); color: var(--snow); box-shadow: 0 5px 12px rgba(17,26,46,.22); }
+      .start-button.is-active:hover:not(:disabled), .highlighter-button.is-active:hover:not(:disabled) { background: #050a15; color: var(--snow); }
       .capture-preview, .color-picker { position: relative; width: 100%; margin-bottom: 10px; padding: 10px; overflow: hidden; border: 1px solid rgba(17,26,46,.08); border-radius: 20px; background: var(--snow); opacity: 0; transform: translateY(8px) scale(.99); transition: opacity .18s ease, transform .2s cubic-bezier(.22, 1, .36, 1); box-shadow: 0 16px 44px rgba(17,26,46,.16); }
       .capture-preview.is-visible, .color-picker.is-visible { opacity: 1; transform: translateY(0) scale(1); }
       .preview-image-shell { position: relative; overflow: hidden; min-height: 132px; max-height: min(280px, 42vh); border-radius: 13px; display: grid; place-items: center; background: var(--fog); }

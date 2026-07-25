@@ -77,6 +77,7 @@
     { name: "placeholder", score: 68 },
   ]);
   const PREFERRED_DATA_ATTRIBUTE_PATTERN = /^data-(?:test|qa|cy|automation|component|element|hook)(?:-|$)/;
+  const TEXT_QUOTE_CONTEXT_LENGTH = 32;
 
   function pageUrl(value) {
     const url = new URL(value);
@@ -474,6 +475,267 @@
     }
   }
 
+  function textTargetForRange(range) {
+    if (!range || range.collapsed) return null;
+    const doc = range.startContainer?.ownerDocument || range.endContainer?.ownerDocument;
+    if (!doc || range.endContainer?.ownerDocument !== doc) return null;
+    if (
+      range.startContainer?.getRootNode?.() !== doc
+      || range.endContainer?.getRootNode?.() !== doc
+    ) {
+      return null;
+    }
+
+    const commonAncestor = range.commonAncestorContainer;
+    const rootElement = commonAncestor?.nodeType === 1
+      ? commonAncestor
+      : commonAncestor?.parentElement;
+    if (!rootElement || rootElement.getRootNode?.() !== doc) return null;
+
+    const rootXPath = xpathForElement(rootElement);
+    const startOffset = textOffsetForBoundary(
+      rootElement,
+      range.startContainer,
+      range.startOffset,
+    );
+    const endOffset = textOffsetForBoundary(
+      rootElement,
+      range.endContainer,
+      range.endOffset,
+    );
+    const exact = String(range.toString?.() || "");
+    if (
+      !rootXPath
+      || startOffset === null
+      || endOffset === null
+      || endOffset <= startOffset
+      || !exact
+    ) {
+      return null;
+    }
+
+    const rootText = textContentForRangeRoot(rootElement);
+    if (rootText.slice(startOffset, endOffset) !== exact) return null;
+
+    return {
+      type: "text",
+      rootXPath,
+      startOffset,
+      endOffset,
+      quote: {
+        exact,
+        prefix: rootText.slice(
+          Math.max(0, startOffset - TEXT_QUOTE_CONTEXT_LENGTH),
+          startOffset,
+        ),
+        suffix: rootText.slice(
+          endOffset,
+          endOffset + TEXT_QUOTE_CONTEXT_LENGTH,
+        ),
+      },
+    };
+  }
+
+  function resolveTextTarget(target, doc = globalThis.document) {
+    if (!isTextTarget(target) || !doc?.createRange) return null;
+    const exact = target.quote.exact;
+    const root = resolveXPath(target.rootXPath, doc);
+    if (root) {
+      const directRange = textRangeForOffsets(
+        root,
+        target.startOffset,
+        target.endOffset,
+        doc,
+      );
+      if (directRange?.toString() === exact) return directRange;
+
+      const rootOffset = findTextQuoteOffset(
+        textContentForRangeRoot(root),
+        target.quote,
+        target.startOffset,
+      );
+      if (rootOffset !== null) {
+        const quoteRange = textRangeForOffsets(
+          root,
+          rootOffset,
+          rootOffset + exact.length,
+          doc,
+        );
+        if (quoteRange?.toString() === exact) return quoteRange;
+      }
+    }
+
+    const fallbackRoot = doc.body;
+    if (!fallbackRoot || fallbackRoot === root) return null;
+    const fallbackOffset = findTextQuoteOffset(
+      textContentForRangeRoot(fallbackRoot),
+      target.quote,
+      null,
+    );
+    if (fallbackOffset === null) return null;
+    const fallbackRange = textRangeForOffsets(
+      fallbackRoot,
+      fallbackOffset,
+      fallbackOffset + exact.length,
+      doc,
+    );
+    return fallbackRange?.toString() === exact ? fallbackRange : null;
+  }
+
+  function isTextTarget(target) {
+    return Boolean(
+      target
+      && target.type === "text"
+      && typeof target.rootXPath === "string"
+      && Number.isInteger(target.startOffset)
+      && target.startOffset >= 0
+      && Number.isInteger(target.endOffset)
+      && target.endOffset > target.startOffset
+      && target.quote
+      && typeof target.quote.exact === "string"
+      && target.quote.exact.length === target.endOffset - target.startOffset
+      && typeof target.quote.prefix === "string"
+      && typeof target.quote.suffix === "string",
+    );
+  }
+
+  function textTargetKey(target) {
+    if (!isTextTarget(target)) return "";
+    return JSON.stringify([
+      target.rootXPath,
+      target.startOffset,
+      target.endOffset,
+      target.quote.exact,
+    ]);
+  }
+
+  function findTextQuoteOffset(text, quote, expectedOffset = null) {
+    const value = String(text || "");
+    const exact = String(quote?.exact || "");
+    const prefix = String(quote?.prefix || "");
+    const suffix = String(quote?.suffix || "");
+    if (!exact) return null;
+
+    const matches = [];
+    let searchOffset = 0;
+    while (searchOffset <= value.length - exact.length) {
+      const matchOffset = value.indexOf(exact, searchOffset);
+      if (matchOffset < 0) break;
+      const prefixStart = Math.max(0, matchOffset - prefix.length);
+      const suffixEnd = matchOffset + exact.length + suffix.length;
+      const prefixMatches = !prefix
+        || value.slice(prefixStart, matchOffset) === prefix;
+      const suffixMatches = !suffix
+        || value.slice(matchOffset + exact.length, suffixEnd) === suffix;
+      if (prefixMatches && suffixMatches) matches.push(matchOffset);
+      searchOffset = matchOffset + 1;
+    }
+    if (matches.length === 1) return matches[0];
+    if (!matches.length || !Number.isInteger(expectedOffset)) return null;
+    const exactExpectedMatch = matches.filter((offset) => offset === expectedOffset);
+    return exactExpectedMatch.length === 1 ? exactExpectedMatch[0] : null;
+  }
+
+  function textOffsetForBoundary(root, boundaryNode, boundaryOffset) {
+    if (!root || !boundaryNode || !Number.isInteger(boundaryOffset)) return null;
+    let total = 0;
+    let resolved = null;
+
+    function visit(node) {
+      if (resolved !== null) return;
+      if (node === boundaryNode) {
+        if (node.nodeType === 3) {
+          const length = String(node.nodeValue ?? node.textContent ?? "").length;
+          if (boundaryOffset < 0 || boundaryOffset > length) return;
+          resolved = total + boundaryOffset;
+          return;
+        }
+        const children = Array.from(node.childNodes || []);
+        if (boundaryOffset < 0 || boundaryOffset > children.length) return;
+        for (let index = 0; index < boundaryOffset; index += 1) {
+          total += textContentForRangeRoot(children[index]).length;
+        }
+        resolved = total;
+        return;
+      }
+      if (node.nodeType === 3) {
+        total += String(node.nodeValue ?? node.textContent ?? "").length;
+        return;
+      }
+      for (const child of Array.from(node.childNodes || [])) {
+        visit(child);
+        if (resolved !== null) return;
+      }
+    }
+
+    visit(root);
+    return resolved;
+  }
+
+  function textRangeForOffsets(root, startOffset, endOffset, doc) {
+    if (
+      !root
+      || !Number.isInteger(startOffset)
+      || !Number.isInteger(endOffset)
+      || startOffset < 0
+      || endOffset <= startOffset
+    ) {
+      return null;
+    }
+    const start = textBoundaryForOffset(root, startOffset);
+    const end = textBoundaryForOffset(root, endOffset);
+    if (!start || !end) return null;
+    try {
+      const range = doc.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      return range;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function textBoundaryForOffset(root, targetOffset) {
+    const textNodes = [];
+    collectTextNodes(root, textNodes);
+    let remaining = targetOffset;
+    for (let index = 0; index < textNodes.length; index += 1) {
+      const node = textNodes[index];
+      const length = String(node.nodeValue ?? node.textContent ?? "").length;
+      if (remaining < length || (remaining === length && index === textNodes.length - 1)) {
+        return { node, offset: remaining };
+      }
+      if (remaining === length) {
+        return { node: textNodes[index + 1], offset: 0 };
+      }
+      remaining -= length;
+    }
+    return null;
+  }
+
+  function textContentForRangeRoot(root) {
+    if (!root) return "";
+    if (root.nodeType === 3) {
+      return String(root.nodeValue ?? root.textContent ?? "");
+    }
+    const textNodes = [];
+    collectTextNodes(root, textNodes);
+    return textNodes
+      .map((node) => String(node.nodeValue ?? node.textContent ?? ""))
+      .join("");
+  }
+
+  function collectTextNodes(node, output) {
+    if (!node) return;
+    if (node.nodeType === 3) {
+      output.push(node);
+      return;
+    }
+    for (const child of Array.from(node.childNodes || [])) {
+      collectTextNodes(child, output);
+    }
+  }
+
   function resolveXPath(value, doc = globalThis.document) {
     if (!doc || typeof doc.evaluate !== "function") return null;
     const segments = splitCompoundXPath(value);
@@ -687,10 +949,15 @@
     ensureOrigin,
     isShareColorToken,
     isShareId,
+    isTextTarget,
     pageUrl,
+    findTextQuoteOffset,
     resolveXPath,
+    resolveTextTarget,
     sharePageUrl,
     splitCompoundXPath,
+    textTargetForRange,
+    textTargetKey,
     withShareColor,
     isStableClass,
     isStableId,

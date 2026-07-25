@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "A-Note",
   "version": "1.1.0",
-  "description": "Highlight elements, leave local comments, and share annotations by URL.",
+  "description": "Leave notes in place, on web pages, and share them as screenshots.",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "icons": {
