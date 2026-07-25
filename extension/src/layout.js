@@ -1,7 +1,6 @@
 (function (root, factory) {
   const api = factory();
-  root.AnnotateLayout = api;
-  if (typeof module === "object" && module.exports) module.exports = api;
+  root.ANoteLayout = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
@@ -84,6 +83,11 @@
       && Number.isFinite(position.screenWidth)
       && position.screenWidth === viewportWidth,
     );
+  }
+
+  function setConnectorVisible(connector, visible) {
+    if (!connector) return;
+    connector.toggleAttribute("hidden", !visible);
   }
 
   function connectorGeometry(targetRect, annotationRect) {
@@ -252,5 +256,6 @@
     connectorGeometry,
     expandRect,
     manualPositionMatchesViewport,
+    setConnectorVisible,
   };
 });

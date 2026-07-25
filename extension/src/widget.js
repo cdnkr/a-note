@@ -1,24 +1,28 @@
-(function () {
+(function (root, factory) {
+  root.ANoteWidget = factory();
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
-
-  if (window.top !== window || document.getElementById("annotate-extension-root")) return;
 
   const {
     MAX_CONTENT_LENGTH,
     pageUrl,
+    resolveXPath,
     xpathForElement,
-  } = globalThis.AnnotateLib;
+  } = globalThis.ANoteLib;
   const {
-    COMMENT_MAX_WIDTH,
     commentLayout,
     connectorGeometry,
     expandRect,
     manualPositionMatchesViewport,
-  } = globalThis.AnnotateLayout;
+    setConnectorVisible,
+  } = globalThis.ANoteLayout;
+  const {
+    DEFAULT_COLOR_ID,
+    COLORS: ANNOTATION_COLORS,
+    colorById,
+    svgPath,
+  } = globalThis.ANoteBrand;
 
-  const COLOR_STORAGE_KEY = "annotate:annotation-color";
-  const MANUAL_POSITION_STORAGE_PREFIX = "annotate:manual-positions:";
-  const DEFAULT_COLOR_ID = "cobalt";
   const DRAG_THRESHOLD = 3;
   const EXCALIFONT_SUBSETS = [
     {
@@ -50,26 +54,16 @@
       range: "U+300-301,U+303",
     },
   ];
-  const ANNOTATION_COLORS = [
-    { id: "cobalt", label: "Cobalt", value: "#405cf5", foreground: "#ffffff" },
-    { id: "indigo", label: "Indigo", value: "#4f46e5", foreground: "#ffffff" },
-    { id: "violet", label: "Violet", value: "#7c3aed", foreground: "#ffffff" },
-    { id: "purple", label: "Purple", value: "#9333ea", foreground: "#ffffff" },
-    { id: "pink", label: "Pink", value: "#db2777", foreground: "#ffffff" },
-    { id: "red", label: "Red", value: "#dc2626", foreground: "#ffffff" },
-    { id: "orange", label: "Orange", value: "#f97316", foreground: "#111a2e" },
-    { id: "yellow", label: "Yellow", value: "#facc15", foreground: "#111a2e" },
-    { id: "lime", label: "Lime", value: "#84cc16", foreground: "#111a2e" },
-    { id: "green", label: "Green", value: "#059669", foreground: "#ffffff" },
-    { id: "teal", label: "Teal", value: "#0d9488", foreground: "#ffffff" },
-    { id: "slate", label: "Slate", value: "#344054", foreground: "#ffffff" },
-  ];
+  function mount(options = {}) {
+    const environment = options.environment || {};
+    const hostId = options.hostId || "a-extension-root";
+    if (window.top !== window) throw new Error("ANote can only mount in the top frame");
+    if (document.getElementById(hostId)) throw new Error(`ANote is already mounted as #${hostId}`);
 
-  const state = {
+    const state = {
     annotations: [],
     active: false,
     annotating: false,
-    composerTarget: null,
     sharingIds: new Set(),
     capturing: false,
     preview: null,
@@ -77,20 +71,32 @@
     colorPickerOpen: false,
     manualPositions: new Map(),
     dragging: null,
-  };
+    revealedAnnotationIds: new Set(),
+    pendingSeeds: Array.isArray(options.seeds) ? [...options.seeds] : [],
+    };
 
-  let pageKey = pageUrl(location.href);
-  const host = document.createElement("div");
-  host.id = "annotate-extension-root";
-  host.setAttribute("data-annotate-ui", "true");
-  host.style.setProperty("display", "none", "important");
-  const shadow = host.attachShadow({ mode: "open" });
-  document.documentElement.append(host);
-  const pageStyle = document.createElement("style");
-  pageStyle.textContent = "html.annotate-is-selecting, html.annotate-is-selecting * { cursor: crosshair !important; }";
-  document.documentElement.append(pageStyle);
+    let pageKey = pageUrl(location.href);
+    const captureAvailable = typeof environment.capture === "function";
+    const launcherEnabled = Boolean(options.launcher);
+    const seedPositions = new Map(
+      (Array.isArray(options.seeds) ? options.seeds : [])
+        .filter((seed) => seed.position || seed.offset)
+        .map((seed) => [seed.id, seed.position || seed.offset]),
+    );
+    const assetUrl = typeof environment.assetUrl === "function"
+      ? environment.assetUrl
+      : (path) => path;
+    const host = document.createElement("div");
+    host.id = hostId;
+    host.setAttribute("data-a-ui", "true");
+    host.style.setProperty("display", "none", "important");
+    const shadow = host.attachShadow({ mode: "open" });
+    document.documentElement.append(host);
+    const pageStyle = document.createElement("style");
+    pageStyle.textContent = "html.a-is-selecting, html.a-is-selecting * { cursor: crosshair !important; }";
+    document.documentElement.append(pageStyle);
 
-  shadow.innerHTML = `
+    shadow.innerHTML = `
     <style>${styles()}</style>
     <div class="target-outline" aria-hidden="true"></div>
     <div class="pins" aria-label="Page annotations"></div>
@@ -118,12 +124,12 @@
         </div>
       </section>
       <div class="toolbar">
-        <span class="brand-mark" aria-hidden="true">A</span>
-        <button class="color-button" type="button" aria-label="Choose annotation colour" title="Choose annotation colour" aria-expanded="false"></button>
-        <button class="toolbar-action start-button" type="button" aria-label="Add annotation" title="Add annotation" aria-pressed="false">
+        <img class="brand-mark" src="${assetUrl(svgPath(DEFAULT_COLOR_ID))}" alt="" aria-hidden="true">
+        <button class="color-button has-tooltip" type="button" aria-label="Choose annotation colour" aria-expanded="false"></button>
+        <button class="toolbar-action start-button has-tooltip" type="button" aria-label="Add annotation" aria-pressed="false">
           ${icon("plus")}
         </button>
-        <button class="toolbar-action screenshot-button" type="button" aria-label="Capture viewport" title="Capture viewport">
+        <button class="toolbar-action screenshot-button has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" aria-label="${captureAvailable ? "Capture viewport" : "Capture viewport — available in the Chrome extension"}" ${captureAvailable ? "" : "disabled"}>
           ${icon("screenshot")}
         </button>
         <button class="toolbar-action close-mode" type="button" aria-label="Close annotate mode" title="Close annotate mode">
@@ -131,20 +137,17 @@
         </button>
       </div>
     </section>
-    <section class="composer" hidden role="dialog" aria-label="Add annotation">
-      <textarea id="annotate-comment" maxlength="${MAX_CONTENT_LENGTH}" placeholder="Add a short comment…"></textarea>
-      <div class="composer-foot">
-        <button class="composer-close" type="button" aria-label="Cancel new annotation">${icon("close")}</button>
-        <button class="save-button" type="button" aria-label="Save annotation" disabled>${icon("up")}</button>
-      </div>
-    </section>
+    <button class="launcher" type="button" aria-label="Open annotate demo" hidden>
+      <img class="launcher-mark" src="${assetUrl(svgPath(DEFAULT_COLOR_ID))}" alt="" aria-hidden="true">
+    </button>
     <div class="toast" role="status" aria-live="polite"></div>
   `;
 
-  const ui = {
+    const ui = {
     outline: shadow.querySelector(".target-outline"),
     pins: shadow.querySelector(".pins"),
     dock: shadow.querySelector(".dock"),
+    brandMark: shadow.querySelector(".brand-mark"),
     screenshotButton: shadow.querySelector(".screenshot-button"),
     closeMode: shadow.querySelector(".close-mode"),
     startButton: shadow.querySelector(".start-button"),
@@ -159,22 +162,33 @@
     colorPickerClose: shadow.querySelector(".color-picker-close"),
     colorGrid: shadow.querySelector(".color-grid"),
     colorButton: shadow.querySelector(".color-button"),
-    composer: shadow.querySelector(".composer"),
-    composerClose: shadow.querySelector(".composer-close"),
-    textarea: shadow.querySelector("textarea"),
-    saveButton: shadow.querySelector(".save-button"),
+    launcher: shadow.querySelector(".launcher"),
+    launcherMark: shadow.querySelector(".launcher-mark"),
     toast: shadow.querySelector(".toast"),
-  };
+    };
 
-  let hostHideTimer;
-  let composerHideTimer;
-  let previewHideTimer;
-  let colorPickerHideTimer;
+    let hostHideTimer;
+    let launcherHideTimer;
+    let previewHideTimer;
+    let colorPickerHideTimer;
+    let toastTimer;
 
-  bindUi();
-  initialise();
+    bindUi();
+    const ready = initialise();
 
-  async function initialise() {
+    const controller = {
+      ready,
+      setActive,
+      toggle() {
+        setActive(!state.active);
+      },
+      status() {
+        return { active: state.active, count: state.annotations.length, url: pageKey };
+      },
+    };
+    return controller;
+
+    async function initialise() {
     const [annotations, colorId] = await Promise.all([
       loadAnnotations(),
       loadAnnotationColor(),
@@ -183,15 +197,47 @@
     state.manualPositions = loadManualPositions();
     applyAnnotationColor(colorId, false);
     render();
+    resolvePendingSeeds();
+    if (options.initialActive) setActive(true);
   }
 
-  function bindUi() {
+    function resolvePendingSeeds() {
+      const existingIds = new Set(state.annotations.map((annotation) => annotation.id));
+      state.pendingSeeds = state.pendingSeeds.filter((seed) => !existingIds.has(seed.id));
+      let progressed = true;
+      while (progressed && state.pendingSeeds.length) {
+        progressed = false;
+        const unresolved = [];
+        state.pendingSeeds.forEach((seed) => {
+          const root = seed.root === "widget" ? shadow : document;
+          const target = root.querySelector(seed.selector);
+          if (!target) {
+            unresolved.push(seed);
+            return;
+          }
+          const xpath = xpathForElement(target);
+          if (!xpath) {
+            unresolved.push(seed);
+            return;
+          }
+          state.annotations.push({
+            id: seed.id,
+            xpath,
+            content: String(seed.content || "").slice(0, MAX_CONTENT_LENGTH),
+            createdAt: seed.createdAt || "2026-01-01T00:00:00.000Z",
+          });
+          progressed = true;
+          render();
+        });
+        state.pendingSeeds = unresolved;
+      }
+    }
+
+    function bindUi() {
     ui.closeMode.addEventListener("click", () => setActive(false));
-    ui.screenshotButton.addEventListener("click", captureViewportShare);
-    ui.startButton.addEventListener("click", () => {
-      if (!state.annotating && state.composerTarget) closeComposer();
-      setAnnotating(!state.annotating);
-    });
+    if (captureAvailable) ui.screenshotButton.addEventListener("click", captureViewportShare);
+    if (launcherEnabled) ui.launcher.addEventListener("click", () => setActive(true));
+    ui.startButton.addEventListener("click", () => setAnnotating(!state.annotating));
     ui.previewClose.addEventListener("click", closePreview);
     ui.previewShare.addEventListener("click", sharePreview);
     ui.previewDownload.addEventListener("click", downloadPreview);
@@ -204,20 +250,13 @@
       const button = event.target.closest("[data-color-id]");
       if (button) applyAnnotationColor(button.dataset.colorId);
     });
-    ui.composerClose.addEventListener("click", closeComposer);
-    ui.textarea.addEventListener("input", () => {
-      ui.saveButton.disabled = ui.textarea.value.trim().length === 0;
-      resizeComposerTextarea();
-    });
-    ui.textarea.addEventListener("keydown", (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") saveComposer();
-      if (event.key === "Escape") closeComposer();
-    });
-    ui.saveButton.addEventListener("click", saveComposer);
     ui.pins.addEventListener("pointerdown", startAnnotationDrag);
     ui.pins.addEventListener("pointermove", moveAnnotationDrag);
     ui.pins.addEventListener("pointerup", finishAnnotationDrag);
     ui.pins.addEventListener("pointercancel", finishAnnotationDrag);
+    ui.pins.addEventListener("input", updateAnnotationContent);
+    ui.pins.addEventListener("keydown", handleAnnotationEditKeydown);
+    ui.pins.addEventListener("focusout", finishAnnotationEdit);
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("click", onPageClick, true);
     document.addEventListener("keydown", (event) => {
@@ -236,18 +275,6 @@
     window.addEventListener("hashchange", handleUrlChange);
     window.setInterval(handleUrlChange, 1000);
     window.setInterval(refreshResolvedTargets, 1500);
-
-    if (chrome?.runtime?.onMessage) {
-      chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-        if (message?.type === "ANNOTATE_TOGGLE_ACTIVE") {
-          setActive(!state.active);
-          sendResponse({ ok: true, active: state.active });
-        }
-        if (message?.type === "ANNOTATE_STATUS") {
-          sendResponse({ ok: true, count: state.annotations.length, url: pageKey });
-        }
-      });
-    }
   }
 
   async function handleUrlChange() {
@@ -258,7 +285,7 @@
     pageKey = nextPageKey;
     state.annotations = await loadAnnotations();
     state.manualPositions = loadManualPositions();
-    closeComposer();
+    state.revealedAnnotationIds.clear();
     closePreview();
     setColorPickerOpen(false);
     setAnnotating(false);
@@ -267,6 +294,7 @@
 
   function refreshResolvedTargets() {
     if (!state.active) return;
+    if (state.pendingSeeds.length) resolvePendingSeeds();
     const expected = state.annotations
       .filter((annotation) => resolveElement(annotation.xpath))
       .length;
@@ -281,15 +309,27 @@
   function setActive(active) {
     state.active = active;
     clearTimeout(hostHideTimer);
-    chrome.runtime.sendMessage({ type: "ANNOTATE_ACTIVE_CHANGED", active }).catch(() => {});
+    clearTimeout(launcherHideTimer);
+    try {
+      environment.activeChanged?.(active);
+    } catch (_error) {
+      // Environment notifications must not affect the in-page UI.
+    }
     if (!active) {
       finishAnnotationDrag();
       setAnnotating(false);
-      closeComposer();
       closePreview();
       setColorPickerOpen(false);
       ui.dock.classList.remove("is-visible");
       const annotationExitDuration = playAnnotationExit();
+      if (launcherEnabled) {
+        host.style.setProperty("display", "block", "important");
+        ui.launcher.hidden = false;
+        requestAnimationFrame(() => {
+          if (!state.active) ui.launcher.classList.add("is-visible");
+        });
+        return;
+      }
       hostHideTimer = setTimeout(() => {
         if (!state.active) host.style.setProperty("display", "none", "important");
       }, Math.max(300, annotationExitDuration + 40));
@@ -297,10 +337,22 @@
     }
 
     host.style.setProperty("display", "block", "important");
+    if (launcherEnabled) {
+      ui.launcher.classList.remove("is-visible");
+      launcherHideTimer = setTimeout(() => {
+        if (state.active) ui.launcher.hidden = true;
+      }, 240);
+    }
     ui.pins.classList.remove("is-exiting");
+    state.revealedAnnotationIds.clear();
     render();
     requestAnimationFrame(() => {
-      if (state.active) ui.dock.classList.add("is-visible");
+      if (!state.active) return;
+      ui.dock.classList.add("is-visible");
+      positionAnchoredUi();
+      setTimeout(() => {
+        if (state.active) positionAnchoredUi();
+      }, 320);
     });
   }
 
@@ -319,37 +371,49 @@
     return (comments.length - 1) * 50 + 220;
   }
 
-  function setAnnotating(active, preserveComposer = false) {
+  function setAnnotating(active) {
     state.annotating = active;
-    document.documentElement.classList.toggle("annotate-is-selecting", active);
+    document.documentElement.classList.toggle("a-is-selecting", active);
     ui.startButton.classList.toggle("is-active", active);
     ui.startButton.setAttribute("aria-pressed", String(active));
     ui.startButton.setAttribute("aria-label", active ? "Stop adding annotations" : "Add annotation");
-    ui.startButton.title = active ? "Stop adding annotations" : "Add annotation";
     ui.outline.style.display = "none";
     if (active) {
       showToast("Select an element to annotate");
-    } else if (!preserveComposer) {
-      closeComposer();
     }
   }
 
   function onPointerMove(event) {
     if (!state.annotating || isExtensionUi(event)) return;
-    const target = event.target;
-    if (!(target instanceof Element) || target === document.documentElement || target === document.body) return;
+    const target = selectableEventTarget(event);
+    if (!target) return;
     positionTargetOutline(target.getBoundingClientRect());
   }
 
   function onPageClick(event) {
     if (!state.annotating || isExtensionUi(event)) return;
-    const target = event.target;
-    if (!(target instanceof Element) || target === document.documentElement || target === document.body) return;
+    const target = selectableEventTarget(event);
+    if (!target) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    state.composerTarget = target;
-    setAnnotating(false, true);
-    openComposer();
+    createAnnotation(target);
+  }
+
+  function createAnnotation(target) {
+    const annotation = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      xpath: xpathForElement(target),
+      content: "",
+      createdAt: new Date().toISOString(),
+    };
+    state.annotations.push(annotation);
+    setAnnotating(false);
+    render();
+    const copy = ui.pins.querySelector(
+      `[data-page-comment="${cssEscape(annotation.id)}"] .page-comment-copy`,
+    );
+    if (copy) startAnnotationEdit(copy);
+    saveAnnotations().catch(() => showToast("Could not save annotation"));
   }
 
   function startAnnotationDrag(event) {
@@ -359,7 +423,7 @@
       : null;
     const stack = copy?.closest(".annotation-stack");
     const annotation = stack && findAnnotation(stack.dataset.anchor);
-    if (!copy || !stack || !annotation) return;
+    if (!copy || !stack || !annotation || copy.isContentEditable) return;
 
     const rect = stack.getBoundingClientRect();
     state.dragging = {
@@ -432,96 +496,113 @@
       drag.copy.releasePointerCapture(drag.pointerId);
     }
     state.dragging = null;
-    if (drag.moved) saveManualPositions();
+    if (drag.moved) {
+      saveManualPositions();
+    } else if (event?.type === "pointerup") {
+      startAnnotationEdit(drag.copy, event.clientX, event.clientY);
+    }
     event?.preventDefault();
     event?.stopPropagation();
+  }
+
+  function startAnnotationEdit(copy, clientX, clientY) {
+    copy.setAttribute("contenteditable", "plaintext-only");
+    copy.setAttribute("role", "textbox");
+    copy.setAttribute("aria-label", "Edit annotation");
+    copy.setAttribute("aria-multiline", "true");
+    copy.focus({ preventScroll: true });
+    placeAnnotationCaret(copy, clientX, clientY);
+  }
+
+  function updateAnnotationContent(event) {
+    const copy = event.target instanceof Element
+      ? event.target.closest(".page-comment-copy")
+      : null;
+    const stack = copy?.closest(".annotation-stack");
+    const annotation = stack && findAnnotation(stack.dataset.anchor);
+    if (!copy?.isContentEditable || !annotation) return;
+
+    const editableContent = readEditableContent(copy);
+    const content = editableContent.slice(0, MAX_CONTENT_LENGTH);
+    if (content !== editableContent) {
+      copy.textContent = content;
+      placeAnnotationCaret(copy);
+    }
+    annotation.content = content;
+    saveAnnotations().catch(() => showToast("Could not save annotation"));
+    positionPins();
+  }
+
+  function handleAnnotationEditKeydown(event) {
+    if (event.key !== "Escape" || !(event.target instanceof Element)) return;
+    const copy = event.target.closest(".page-comment-copy");
+    if (!copy?.isContentEditable) return;
+    const stack = copy.closest(".annotation-stack");
+    const annotation = stack && findAnnotation(stack.dataset.anchor);
+    event.preventDefault();
+    event.stopPropagation();
+    copy.blur();
+    if (annotation?.content === "") {
+      deleteAnnotation(annotation.id);
+    }
+  }
+
+  function finishAnnotationEdit(event) {
+    const copy = event.target instanceof Element
+      ? event.target.closest(".page-comment-copy")
+      : null;
+    if (!copy?.isContentEditable) return;
+    const stack = copy.closest(".annotation-stack");
+    const annotation = stack && findAnnotation(stack.dataset.anchor);
+    copy.setAttribute("contenteditable", "false");
+    copy.removeAttribute("role");
+    copy.removeAttribute("aria-label");
+    copy.removeAttribute("aria-multiline");
+    if (annotation) copy.textContent = annotation.content;
+  }
+
+  function readEditableContent(copy) {
+    return String(copy.innerText ?? copy.textContent ?? "").replace(/\r\n?/g, "\n");
+  }
+
+  function placeAnnotationCaret(copy, clientX, clientY) {
+    const selection = shadow.getSelection?.() || window.getSelection?.();
+    if (!selection) return;
+
+    const pointRange = Number.isFinite(clientX) && Number.isFinite(clientY)
+      ? document.caretRangeFromPoint?.(clientX, clientY)
+      : null;
+    const range = pointRange && copy.contains(pointRange.startContainer)
+      ? pointRange
+      : document.createRange();
+    if (range !== pointRange) {
+      range.selectNodeContents(copy);
+      range.collapse(false);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
   }
 
   function isExtensionUi(event) {
     return event.composedPath().includes(host);
   }
 
-  function openComposer() {
-    clearTimeout(composerHideTimer);
-    ui.composer.hidden = false;
-    ui.textarea.value = "";
-    ui.textarea.style.height = "126px";
-    ui.saveButton.disabled = true;
-    positionComposer();
-    requestAnimationFrame(() => {
-      if (state.composerTarget) {
-        ui.composer.classList.add("is-visible");
-        ui.textarea.focus();
-      }
-    });
-  }
-
-  function positionComposer() {
-    if (ui.composer.hidden || !state.composerTarget?.isConnected) return;
-    const rect = state.composerTarget.getBoundingClientRect();
-    const outlineRect = positionTargetOutline(rect);
-    const width = Math.min(COMMENT_MAX_WIDTH, window.innerWidth - 16);
-    const placement = annotationPlacement(outlineRect, width);
-    const existingStacks = state.annotations
-      .filter((annotation) => resolveElement(annotation.xpath) === state.composerTarget)
-      .map((annotation) => ui.pins.querySelector(`[data-anchor="${cssEscape(annotation.id)}"]`))
-      .filter((stack) => stack && !stack.hidden);
-    const lastStack = existingStacks.reduce((lowest, stack) => {
-      if (!lowest) return stack;
-      return stack.getBoundingClientRect().bottom > lowest.getBoundingClientRect().bottom
-        ? stack
-        : lowest;
-    }, null);
-
-    if (lastStack) {
-      const commentRect = lastStack.querySelector(".page-comment")?.getBoundingClientRect();
-      if (commentRect) {
-        placement.left = commentRect.left + window.scrollX;
-        placement.top = commentRect.bottom + window.scrollY + 7;
-      }
-    }
-    Object.assign(ui.composer.style, {
-      width: `${width}px`,
-      left: `${placement.left}px`,
-      top: `${placement.top}px`,
-    });
-  }
-
-  function resizeComposerTextarea() {
-    ui.textarea.style.height = "auto";
-    ui.textarea.style.height = `${Math.min(Math.max(ui.textarea.scrollHeight, 126), 240)}px`;
-    positionComposer();
-  }
-
-  function closeComposer() {
-    clearTimeout(composerHideTimer);
-    ui.composer.classList.remove("is-visible");
-    ui.outline.style.display = "none";
-    state.composerTarget = null;
-    composerHideTimer = setTimeout(() => {
-      if (!state.composerTarget) ui.composer.hidden = true;
-    }, 180);
-  }
-
-  async function saveComposer() {
-    const content = ui.textarea.value.trim().slice(0, MAX_CONTENT_LENGTH);
-    if (!content || !state.composerTarget) return;
-    const annotation = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-      xpath: xpathForElement(state.composerTarget),
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    state.annotations.push(annotation);
-    await saveAnnotations();
-    closeComposer();
-    render();
-    showToast("Annotation saved");
+  function selectableEventTarget(event) {
+    const path = typeof event.composedPath === "function"
+      ? event.composedPath()
+      : [event.target];
+    return path.find((candidate) => (
+      candidate instanceof Element
+      && candidate !== document.documentElement
+      && candidate !== document.body
+      && candidate !== host
+    )) || null;
   }
 
   async function deleteAnnotation(id) {
     state.annotations = state.annotations.filter((item) => item.id !== id);
     state.manualPositions.delete(id);
+    state.revealedAnnotationIds.delete(id);
     saveManualPositions();
     await saveAnnotations();
     render();
@@ -529,7 +610,7 @@
   }
 
   async function shareAnnotation(annotation) {
-    if (!annotation || state.capturing || state.sharingIds.has(annotation.id)) return;
+    if (!captureAvailable || !annotation || state.capturing || state.sharingIds.has(annotation.id)) return;
     const element = resolveElement(annotation.xpath);
     if (!element) {
       showToast("Element not found — screenshot unavailable");
@@ -564,7 +645,7 @@
   }
 
   async function captureViewportShare() {
-    if (state.capturing) return;
+    if (!captureAvailable || state.capturing) return;
     try {
       await enterViewportCaptureMode();
       const response = await createScreenshotShare();
@@ -587,8 +668,7 @@
   }
 
   function createScreenshotShare() {
-    return chrome.runtime.sendMessage({
-      type: "ANNOTATE_CAPTURE_AND_CREATE_SHARE",
+    return environment.capture({
       targetUrl: pageKey,
       colorToken: state.colorId,
     });
@@ -597,7 +677,7 @@
   function setPageShareButtonState(id, sharing) {
     const button = ui.pins.querySelector(`[data-page-share="${cssEscape(id)}"]`);
     if (!button) return;
-    button.disabled = sharing || state.capturing;
+    button.disabled = !captureAvailable || sharing || state.capturing;
     button.setAttribute("aria-busy", String(sharing));
   }
 
@@ -643,18 +723,18 @@
     host.classList.remove("is-capturing", "is-capturing-note", "is-capturing-viewport");
     clearCaptureTargets();
     setCaptureBusy(false);
-    ui.outline.style.display = state.composerTarget ? "block" : "none";
+    ui.outline.style.display = "none";
     positionAnchoredUi();
   }
 
   function setCaptureBusy(busy) {
     state.capturing = busy;
-    ui.screenshotButton.disabled = busy;
+    ui.screenshotButton.disabled = !captureAvailable || busy;
     ui.screenshotButton.setAttribute("aria-busy", String(busy));
     ui.colorButton.disabled = busy;
     ui.startButton.disabled = busy;
     ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
-      button.disabled = busy || state.sharingIds.has(button.dataset.pageShare);
+      button.disabled = !captureAvailable || busy || state.sharingIds.has(button.dataset.pageShare);
     });
   }
 
@@ -702,23 +782,22 @@
   }
 
   function applyAnnotationColor(colorId, persist = true) {
-    const color = ANNOTATION_COLORS.find((option) => option.id === colorId)
-      || ANNOTATION_COLORS.find((option) => option.id === DEFAULT_COLOR_ID);
-    if (!color) return;
+    const color = colorById(colorId);
     state.colorId = color.id;
     host.style.setProperty("--annotation-color", color.value);
     host.style.setProperty("--annotation-fg", color.foreground);
     host.style.setProperty("--annotation-outline", color.value);
+    ui.brandMark.src = assetUrl(svgPath(color.id));
+    ui.launcherMark.src = assetUrl(svgPath(color.id));
     ui.colorButton.style.backgroundColor = color.value;
-    ui.colorButton.setAttribute("aria-label", `Choose annotation colour. Current colour: ${color.label}`);
-    ui.colorButton.title = `Annotation colour: ${color.label}`;
+    ui.colorButton.setAttribute("aria-label", "Choose annotation colour");
     ui.colorGrid.querySelectorAll("[data-color-id]").forEach((button) => {
       const active = button.dataset.colorId === color.id;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-checked", String(active));
     });
     if (persist) {
-      chrome.storage.local.set({ [COLOR_STORAGE_KEY]: color.id }).catch(() => {});
+      Promise.resolve(environment.saveColor?.(color.id)).catch(() => {});
     }
   }
 
@@ -756,8 +835,8 @@
     if (!shareUrl) return;
     try {
       const shareData = {
-        title: document.title || "Annotated screenshot",
-        text: "Shared with Annotate",
+        title: document.title || "ANoted screenshot",
+        text: "Shared with ANote",
         url: shareUrl,
       };
       const canShare = typeof navigator.share === "function"
@@ -803,7 +882,7 @@
       const link = document.createElement("a");
       const hostName = new URL(pageKey).hostname.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
       link.href = href;
-      link.download = `annotate-${preview.kind}-${hostName || "page"}.jpg`;
+      link.download = `a-${preview.kind}-${hostName || "page"}.jpg`;
       shadow.append(link);
       link.click();
       link.remove();
@@ -827,11 +906,7 @@
   }
 
   function resolveElement(xpath) {
-    try {
-      return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    } catch (_error) {
-      return null;
-    }
+    return resolveXPath(xpath, document);
   }
 
   function render() {
@@ -840,32 +915,31 @@
 
   function renderPins() {
     finishAnnotationDrag();
-    let revealIndex = 0;
     ui.pins.innerHTML = state.annotations.map((annotation) => {
       const element = resolveElement(annotation.xpath);
       if (!element) return "";
-      const revealDelay = revealIndex * 50;
       const sharing = state.sharingIds.has(annotation.id);
-      revealIndex += 1;
       return `
         <svg class="annotation-connector" data-connector="${escapeHtml(annotation.id)}" aria-hidden="true"><path></path></svg>
         <div class="element-highlight" data-highlight="${escapeHtml(annotation.id)}" aria-hidden="true"></div>
         <div class="annotation-stack" data-anchor="${escapeHtml(annotation.id)}">
-        <div class="page-comment-row" style="--reveal-delay: ${revealDelay}ms">
+        <div class="page-comment-row">
           <article class="page-comment" data-page-comment="${escapeHtml(annotation.id)}">
             <span class="page-comment-copy">${escapeHtml(annotation.content)}</span>
             <span class="page-comment-actions">
-              <button class="page-comment-action page-comment-share" type="button" data-page-share="${escapeHtml(annotation.id)}" aria-label="Share annotation" title="Share annotation" aria-busy="${sharing}" ${sharing ? "disabled" : ""}>${icon("screenshot")}</button>
-              <button class="page-comment-action page-comment-delete" type="button" data-page-delete="${escapeHtml(annotation.id)}" aria-label="Delete annotation" title="Delete annotation">${icon("close")}</button>
+              <button class="page-comment-action page-comment-share has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" data-page-share="${escapeHtml(annotation.id)}" aria-label="${captureAvailable ? "Capture screenshot" : "Capture screenshot — available in the Chrome extension"}" aria-busy="${sharing}" ${captureAvailable && !sharing ? "" : "disabled"}>${icon("screenshot")}</button>
+              <button class="page-comment-action page-comment-delete has-tooltip" type="button" data-page-delete="${escapeHtml(annotation.id)}" aria-label="Delete annotation">${icon("close")}</button>
             </span>
           </article>
         </div>
         </div>`;
     }).join("");
 
-    ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
-      button.addEventListener("click", () => shareAnnotation(findAnnotation(button.dataset.pageShare)));
-    });
+    if (captureAvailable) {
+      ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
+        button.addEventListener("click", () => shareAnnotation(findAnnotation(button.dataset.pageShare)));
+      });
+    }
     ui.pins.querySelectorAll("[data-page-delete]").forEach((button) => {
       button.addEventListener("click", () => deleteAnnotation(button.dataset.pageDelete));
     });
@@ -904,12 +978,14 @@
       if (!element) {
         stack.hidden = true;
         if (highlight) highlight.hidden = true;
-        if (connector) connector.hidden = true;
+        setConnectorVisible(connector, false);
         return;
       }
       const rect = element.getBoundingClientRect();
       const outlineRect = expandRect(rect);
-      const outsideViewport = outlineRect.bottom < 0
+      const targetHidden = Boolean(element.closest?.("[hidden]"));
+      const outsideViewport = targetHidden
+        || outlineRect.bottom < 0
         || outlineRect.top > window.innerHeight
         || outlineRect.right < 0
         || outlineRect.left > window.innerWidth;
@@ -922,7 +998,7 @@
         highlight.style.height = `${outlineRect.height}px`;
       }
       if (outsideViewport) {
-        if (connector) connector.hidden = true;
+        setConnectorVisible(connector, false);
         return;
       }
 
@@ -939,9 +1015,34 @@
         return;
       }
 
-      stack.classList.remove("is-manual");
-      if (connector) connector.hidden = true;
       const placement = annotationPlacement(outlineRect, noteWidth);
+      const seedPosition = seedPositions.get(annotation.id);
+      if (seedPosition && (!seedPosition.minWidth || window.innerWidth >= seedPosition.minWidth)) {
+        const actionSide = seedPosition.actionSide === "left"
+          || seedPosition.actionSide === "right"
+          ? seedPosition.actionSide
+          : placement.actionSide;
+        const left = placement.left + (Number(seedPosition.x) || 0);
+        const top = placement.top + (Number(seedPosition.y) || 0);
+        stack.dataset.placement = "manual";
+        stack.dataset.actionSide = actionSide;
+        stack.classList.add("is-manual");
+        stack.style.left = `${left}px`;
+        stack.style.top = `${top}px`;
+        if (seedPosition.pagePinned) {
+          state.manualPositions.set(annotation.id, {
+            left,
+            top,
+            screenWidth: window.innerWidth,
+            actionSide,
+          });
+        }
+        positionConnector(connector, outlineRect, stack);
+        return;
+      }
+
+      stack.classList.remove("is-manual");
+      setConnectorVisible(connector, false);
       const offset = automaticOffsets.get(element) || 0;
       placement.top += offset;
       automaticOffsets.set(element, offset + stack.offsetHeight + 7);
@@ -949,6 +1050,29 @@
       stack.dataset.actionSide = placement.actionSide;
       stack.style.left = `${placement.left}px`;
       stack.style.top = `${placement.top}px`;
+    });
+    revealVisibleAnnotations();
+  }
+
+  function revealVisibleAnnotations() {
+    if (!state.active || ui.pins.classList.contains("is-exiting")) return;
+
+    const rowsToReveal = [];
+    ui.pins.querySelectorAll(".annotation-stack").forEach((stack) => {
+      const id = stack.dataset.anchor;
+      if (!id || stack.hidden || state.revealedAnnotationIds.has(id)) return;
+      state.revealedAnnotationIds.add(id);
+      const row = stack.querySelector(".page-comment-row");
+      if (row) rowsToReveal.push(row);
+    });
+
+    rowsToReveal.forEach((row, index) => {
+      row.style.setProperty("--reveal-delay", `${index * 50}ms`);
+      row.classList.add("is-revealing");
+      row.addEventListener("animationend", () => {
+        row.classList.remove("is-revealing");
+        row.style.removeProperty("--reveal-delay");
+      }, { once: true });
     });
   }
 
@@ -972,7 +1096,7 @@
       height: copyRect.height,
     };
     const geometry = connectorGeometry(targetRect, annotationRect);
-    connector.hidden = false;
+    setConnectorVisible(connector, true);
     connector.style.left = `${geometry.left}px`;
     connector.style.top = `${geometry.top}px`;
     connector.style.width = `${geometry.width}px`;
@@ -983,7 +1107,6 @@
 
   function positionAnchoredUi() {
     positionPins();
-    positionComposer();
   }
 
   function findAnnotation(id) {
@@ -992,8 +1115,8 @@
 
   async function loadAnnotations() {
     try {
-      const stored = await chrome.storage.local.get(pageKey);
-      return Array.isArray(stored[pageKey]) ? stored[pageKey] : [];
+      const stored = await environment.loadAnnotations?.(pageKey);
+      return Array.isArray(stored) ? stored : [];
     } catch (_error) {
       return [];
     }
@@ -1001,10 +1124,8 @@
 
   async function loadAnnotationColor() {
     try {
-      const stored = await chrome.storage.local.get(COLOR_STORAGE_KEY);
-      return typeof stored[COLOR_STORAGE_KEY] === "string"
-        ? stored[COLOR_STORAGE_KEY]
-        : DEFAULT_COLOR_ID;
+      const stored = await environment.loadColor?.();
+      return typeof stored === "string" ? stored : DEFAULT_COLOR_ID;
     } catch (_error) {
       return DEFAULT_COLOR_ID;
     }
@@ -1012,7 +1133,7 @@
 
   function loadManualPositions() {
     try {
-      const stored = JSON.parse(window.localStorage.getItem(manualPositionStorageKey()) || "{}");
+      const stored = environment.loadManualPositions?.(pageKey) || {};
       return new Map(
         Object.entries(stored).filter(([, position]) => (
           manualPositionMatchesViewport(position, position?.screenWidth)
@@ -1025,24 +1146,17 @@
 
   function saveManualPositions() {
     try {
-      window.localStorage.setItem(
-        manualPositionStorageKey(),
-        JSON.stringify(Object.fromEntries(state.manualPositions)),
-      );
+      environment.saveManualPositions?.(pageKey, Object.fromEntries(state.manualPositions));
     } catch (_error) {
       // Annotation dragging remains available in memory when page storage is unavailable.
     }
   }
 
-  function manualPositionStorageKey() {
-    return `${MANUAL_POSITION_STORAGE_PREFIX}${pageKey}`;
+  function saveAnnotations() {
+    const annotations = state.annotations.map((annotation) => ({ ...annotation }));
+    return Promise.resolve(environment.saveAnnotations?.(pageKey, annotations));
   }
 
-  async function saveAnnotations() {
-    await chrome.storage.local.set({ [pageKey]: state.annotations });
-  }
-
-  let toastTimer;
   function showToast(message) {
     clearTimeout(toastTimer);
     ui.toast.textContent = message;
@@ -1100,7 +1214,7 @@
     return EXCALIFONT_SUBSETS.map(({ file, range }) => `
       @font-face {
         font-family: "Excalifont";
-        src: url("${chrome.runtime.getURL(`fonts/${file}`)}") format("woff2");
+        src: url("${assetUrl(`fonts/${file}`)}") format("woff2");
         font-style: normal;
         font-weight: 400;
         font-display: swap;
@@ -1114,18 +1228,24 @@
       ${excalifontFontFaces()}
       :host { all: initial; --navy: #111a2e; --ink: #222b3e; --muted: #667085; --blue: #405cf5; --blue-dark: #2e48e8; --blue-pale: #edf3ff; --pink: #fff1f3; --line: #e7eaf0; --ink-black: #000000; --snow: #ffffff; --canvas: #f8f8f8; --fog: #efefef; --pebble: #d9d9d9; --graphite: #636363; --slate: #959595; --steel: #aeaeae; --ash: #7c7c7c; --annotation-color: #405cf5; --annotation-fg: #ffffff; --annotation-outline: #405cf5; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--navy); }
       *, *::before, *::after { box-sizing: border-box; }
-      button, textarea { font: inherit; }
+      button { font: inherit; }
       button { color: inherit; }
       svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
       .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
       .dock { position: fixed; z-index: 2147483645; right: 22px; bottom: 22px; width: 360px; opacity: 0; transform: translateX(calc(100% + 32px)); transition: transform .28s cubic-bezier(.22, 1, .36, 1), opacity .18s ease; filter: drop-shadow(0 18px 40px rgba(20, 29, 50, .16)); }
       .dock.is-visible { opacity: 1; transform: translateX(0); }
+      .launcher { position: fixed; z-index: 2147483645; right: 22px; bottom: 22px; width: 58px; height: 58px; padding: 6px; border: 1px solid rgba(17,26,46,.08); border-radius: 17px 17px 17px 5px; display: grid; place-items: center; background: var(--snow); opacity: 0; transform: translateY(calc(100% + 32px)); cursor: pointer; box-shadow: 0 12px 30px rgba(20,29,50,.18); transition: transform .28s cubic-bezier(.22, 1, .36, 1), opacity .18s ease; }
+      .launcher.is-visible { opacity: 1; transform: translateY(0); }
+      .launcher:hover { transform: translateY(-2px); }
+      .launcher:focus-visible { outline: 2px solid rgba(64,92,245,.34); outline-offset: 3px; }
+      .launcher-mark { width: 44px; height: 44px; display: block; }
       .toolbar { width: max-content; min-height: 68px; margin-left: auto; padding: 12px; border: 1px solid rgba(17,26,46,.08); background: #fff; border-radius: 18px 18px 18px 4.5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 3px 12px rgba(20,29,50,.07); transition: opacity .18s ease; }
-      .brand-mark { width: 42px; height: 42px; border-radius: 12px 12px 12px 3px; display: grid; place-items: center; background: var(--annotation-color); color: var(--annotation-fg); font-family: "Excalifont", "Marker Felt", "Segoe Print", "Comic Sans MS", cursive; font-size: 18px; font-weight: 850; line-height: 1; transition: background .16s ease, color .16s ease; }
+      .brand-mark { flex: 0 0 auto; width: 42px; height: 42px; display: block; }
       .toolbar-action { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.05); color: var(--ash); display: grid; place-items: center; cursor: pointer; transition: background .16s ease, color .16s ease; }
       .toolbar-action:hover:not(:disabled) { background: rgba(0,0,0,.10); color: var(--ink-black); }
       .toolbar-action:focus-visible, .ghost-icon:focus-visible, .preview-action:focus-visible, .preview-copy:focus-visible { outline: 2px solid rgba(64,92,245,.34); outline-offset: 2px; }
       .toolbar-action:disabled { opacity: .48; cursor: wait; }
+      .toolbar-action.is-unavailable:disabled, .page-comment-action.is-unavailable:disabled { cursor: not-allowed; }
       .toolbar-action svg { width: 21px; height: 21px; }
       .color-button { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 2px solid var(--snow); border-radius: 50%; background: var(--annotation-color); cursor: pointer; box-shadow: 0 0 0 1px rgba(17,26,46,.14), 0 4px 10px rgba(17,26,46,.12); transition: transform .16s ease, box-shadow .16s ease, background .16s ease; }
       .color-button:hover:not(:disabled) { transform: scale(1.04); box-shadow: 0 0 0 2px rgba(17,26,46,.18), 0 6px 13px rgba(17,26,46,.15); }
@@ -1161,21 +1281,6 @@
       .color-swatch:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px rgba(17,26,46,.08), 0 7px 14px rgba(17,26,46,.13); }
       .color-swatch.is-active { border-color: var(--navy); box-shadow: 0 0 0 2px var(--snow), 0 0 0 3px rgba(17,26,46,.16); }
       .color-swatch:focus-visible { outline: 3px solid rgba(64,92,245,.30); outline-offset: 2px; }
-      .composer { position: absolute; z-index: 2147483647; width: 280px; padding: 0; opacity: 0; transform: translateY(5px) scale(.99); transition: opacity .16s ease, transform .18s cubic-bezier(.22, 1, .36, 1); background: var(--snow); border: 1px solid rgba(0,0,0,.08); border-radius: 20px; overflow: hidden; box-shadow: 0 11px 28px rgba(17,26,46,.18); }
-      .composer.is-visible { opacity: 1; transform: translateY(0) scale(1); }
-      .composer-close { flex: 0 0 auto; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.05); color: var(--ash); cursor: pointer; transition: color .16s ease, background .16s ease; }
-      .composer-close:hover { color: var(--ink-black); background: rgba(0,0,0,.10); }
-      .composer-close:focus-visible { outline: 2px solid rgba(64,92,245,.32); outline-offset: 2px; }
-      .composer-close svg { width: 18px; height: 18px; }
-      .composer textarea { display: block; resize: none; width: 100%; height: 126px; max-height: 240px; margin: 0; padding: 14px 14px 58px; border: 0; border-radius: 20px; outline: none; color: var(--ink); background: var(--snow); box-shadow: none; font-size: 13px; line-height: 1.5; overflow-y: auto; }
-      .composer textarea:focus { border: 0; outline: none; background: var(--snow); box-shadow: none; }
-      .composer textarea::placeholder { color: #a0a6b3; }
-      .composer-foot { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
-      .composer-foot button { pointer-events: auto; }
-      .save-button { width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; background: var(--annotation-color); color: var(--annotation-fg); display: grid; place-items: center; cursor: pointer; box-shadow: 0 5px 12px rgba(17,26,46,.18); transition: background .16s ease, color .16s ease, filter .16s ease, transform .16s ease; }
-      .save-button:hover:not(:disabled) { filter: brightness(.92); transform: translateY(-1px); }
-      .save-button:disabled { opacity: .4; cursor: not-allowed; }
-      .save-button svg { width: 19px; height: 19px; stroke-width: 2; }
       .target-outline { display: none; position: fixed; z-index: 2147483643; pointer-events: none; border: 2px solid var(--annotation-outline); border-radius: 5px; background: transparent; box-shadow: none; transition: left .04s, top .04s, width .04s, height .04s, border-color .16s ease; }
       .pins { position: absolute; left: 0; top: 0; z-index: 2147483644; pointer-events: none; }
       .annotation-connector { position: absolute; z-index: 0; display: block; overflow: visible; pointer-events: none; }
@@ -1185,8 +1290,8 @@
       .annotation-stack { position: absolute; z-index: 2; width: max-content; max-width: calc(100vw - 16px); display: flex; flex-direction: column; align-items: flex-start; gap: 7px; pointer-events: none; }
       .annotation-stack[data-action-side="left"] { align-items: flex-end; }
       .annotation-stack.is-dragging { z-index: 3; }
-      .page-comment-row { width: max-content; max-width: 100%; min-height: 24px; animation: annotation-reveal .28s cubic-bezier(.22, 1, .36, 1) both; animation-delay: var(--reveal-delay, 0ms); }
-      .annotation-stack.is-manual .page-comment-row, .annotation-stack.is-dragging .page-comment-row { animation: none; }
+      .page-comment-row { width: max-content; max-width: 100%; min-height: 24px; }
+      .page-comment-row.is-revealing { animation: annotation-reveal .28s cubic-bezier(.22, 1, .36, 1) both; animation-delay: var(--reveal-delay, 0ms); }
       .page-comment { width: max-content; max-width: 100%; min-height: 24px; padding: 0; border: 0; border-radius: 0; display: flex; align-items: flex-start; gap: 6px; background: transparent; color: var(--annotation-color); text-align: left; box-shadow: none; transition: color .16s ease; }
       .annotation-stack[data-action-side="left"] .page-comment { flex-direction: row-reverse; }
       .page-comment-row.is-exiting { pointer-events: none; animation: annotation-dismiss .22s cubic-bezier(.55, 0, 1, .45) both; animation-delay: var(--exit-delay, 0ms); }
@@ -1195,13 +1300,21 @@
       .page-comment-action:hover:not(:disabled) { background: var(--snow); color: var(--ink-black); transform: translateY(-1px); }
       .page-comment-action:focus-visible { outline: 2px solid rgba(64,92,245,.38); outline-offset: 1px; }
       .page-comment-action:disabled { opacity: .58; cursor: wait; }
-      .page-comment-action svg { width: 12px; height: 12px; stroke-width: 2; }
-      .page-comment-copy { flex: 0 1 auto; display: block; width: max-content; min-width: 0; max-width: min(340px, calc(100vw - 73px)); font-family: "Excalifont", "Marker Felt", "Segoe Print", "Comic Sans MS", cursive; font-size: 16px; font-style: normal; font-weight: 400; line-height: 1.3; font-synthesis: none; overflow-wrap: anywhere; padding: 0 5px; background: white; border: 1px solid rgba(0,0,0,0.05); border-radius: 5px; pointer-events: auto; cursor: move; user-select: none; touch-action: none; }
+      .page-comment-action svg { width: 18px; height: 18px; stroke-width: 1.75; }
+      .page-comment-copy { flex: 0 1 auto; display: block; width: max-content; min-width: 0; max-width: min(340px, calc(100vw - 73px)); font-family: "Excalifont", "Marker Felt", "Segoe Print", "Comic Sans MS", cursive; font-size: 16px; font-style: normal; font-weight: 400; line-height: 1.3; font-synthesis: none; overflow-wrap: anywhere; white-space: pre-wrap; padding: 0 5px; background: white; border: 1px solid rgba(0,0,0,0.05); border-radius: 5px; pointer-events: auto; cursor: move; user-select: none; touch-action: none; }
+      .page-comment-copy[contenteditable="plaintext-only"], .page-comment-copy[contenteditable="true"] { min-width: 80px; cursor: text; user-select: text; touch-action: manipulation; outline: 1px dashed var(--annotation-color); outline-offset: 1px; }
       .annotation-stack.is-dragging .page-comment-copy { cursor: grabbing; }
+      .has-tooltip { position: relative; }
+      .has-tooltip::before, .has-tooltip::after { position: absolute; left: 50%; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+      .has-tooltip::before { content: ""; z-index: 3; bottom: calc(100% + 6px); width: 9px; height: 9px; border-radius: 2px; background: var(--navy); transform: translate(-50%, 7px) rotate(45deg); }
+      .has-tooltip::after { content: attr(aria-label); z-index: 4; bottom: calc(100% + 10px); width: max-content; max-width: min(240px, calc(100vw - 24px)); padding: 10px 14px; border-radius: 10px; background: var(--navy); color: #fff; font-size: 12px; font-weight: 650; line-height: 1.2; text-align: center; white-space: normal; box-shadow: 0 10px 30px rgba(17,26,46,.25); transform: translate(-50%, 7px); }
+      .has-tooltip:hover::before, .has-tooltip:focus-visible::before { opacity: 1; transform: translate(-50%, 0) rotate(45deg); }
+      .has-tooltip:hover::after, .has-tooltip:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
       .toast { position: fixed; z-index: 2147483647; left: 50%; bottom: 24px; transform: translate(-50%, 20px); padding: 10px 14px; border-radius: 10px; background: var(--navy); color: #fff; font-size: 12px; font-weight: 650; opacity: 0; pointer-events: none; transition: .2s ease; box-shadow: 0 10px 30px rgba(17,26,46,.25); }
       .toast.show { opacity: 1; transform: translate(-50%, 0); }
-      :host(.is-capturing) .dock, :host(.is-capturing) .composer, :host(.is-capturing) .toast { opacity: 0 !important; pointer-events: none !important; }
+      :host(.is-capturing) .dock, :host(.is-capturing) .toast { opacity: 0 !important; pointer-events: none !important; }
       :host(.is-capturing) .page-comment-actions { display: none !important; }
+      :host(.is-capturing) .page-comment-copy:empty { display: none !important; }
       :host(.is-capturing-note) .element-highlight, :host(.is-capturing-note) .annotation-stack, :host(.is-capturing-note) .annotation-connector { visibility: hidden !important; }
       :host(.is-capturing-note) .annotation-stack.is-capture-target, :host(.is-capturing-note) .annotation-connector.is-capture-target { visibility: visible !important; }
       :host(.is-capturing-note) .annotation-stack.is-capture-target .page-comment-row { display: none; }
@@ -1211,15 +1324,19 @@
       [hidden] { display: none !important; }
       @keyframes annotation-reveal { from { opacity: 0; transform: translateY(7px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
       @keyframes annotation-dismiss { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(7px) scale(.985); } }
-      @keyframes annotate-pulse { 50% { box-shadow: 0 0 0 7px rgba(64,92,245,.16), 0 11px 28px rgba(17,26,46,.2); } }
+      @keyframes a-pulse { 50% { box-shadow: 0 0 0 7px rgba(64,92,245,.16), 0 11px 28px rgba(17,26,46,.2); } }
       @media (max-width: 520px) {
         .dock { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
-        .composer { width: calc(100vw - 24px); }
+        .launcher { right: 10px; bottom: 10px; }
       }
       @media (prefers-reduced-motion: reduce) {
-        .dock, .capture-preview, .color-picker, .composer, .toolbar { transition-duration: .01ms; }
+        .dock, .launcher, .capture-preview, .color-picker, .toolbar { transition-duration: .01ms; }
         .page-comment-row, .page-comment-row.is-exiting { animation-duration: .01ms; animation-delay: 0ms; }
+        .has-tooltip::before, .has-tooltip::after { transition-duration: .01ms; }
       }
     `;
   }
-})();
+  }
+
+  return { mount };
+});

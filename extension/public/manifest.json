@@ -1,12 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "annotate",
+  "name": "A-Note",
   "version": "1.1.0",
   "description": "Highlight elements, leave local comments, and share annotations by URL.",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "icons/a-cobalt-16.png",
+    "32": "icons/a-cobalt-32.png",
+    "48": "icons/a-cobalt-48.png",
+    "128": "icons/a-cobalt-128.png"
+  },
   "action": {
-    "default_title": "Toggle annotate mode"
+    "default_title": "Toggle note mode",
+    "default_icon": {
+      "16": "icons/a-cobalt-16.png",
+      "24": "icons/a-cobalt-24.png",
+      "32": "icons/a-cobalt-32.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
@@ -14,13 +25,13 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["config.js", "lib.js", "layout.js", "content.js"],
+      "js": ["brand.js", "config.js", "lib.js", "layout.js", "widget.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["fonts/*.woff2"],
+      "resources": ["fonts/*.woff2", "icons/*.svg"],
       "matches": ["<all_urls>"]
     }
   ]

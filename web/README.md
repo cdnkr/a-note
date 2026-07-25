@@ -1,12 +1,12 @@
-# Annotate web
+# A-Note web
 
-The public landing page, screenshot share pages, and Cloudflare Pages Functions API for Annotate.
+The public landing page, screenshot share pages, and Cloudflare Pages Functions API for A-Note.
 
 ## Local development
 
 1. Copy `.env.example` to `.env.local` and set the future Chrome Web Store URL.
 2. Copy `.dev.vars.example` to `.dev.vars` and add that `chrome-extension://...` origin to `ALLOWED_UPLOAD_ORIGINS`.
-3. Set the matching local `webAppOrigin`, `apiBaseUrl`, and allowed origin values in `../extension/config.js`.
+3. Set the matching local `webAppOrigin`, `apiBaseUrl`, and allowed origin values in `../extension/src/config.js`.
 4. Run `pnpm install`, then `pnpm build` and `pnpm pages:dev` to serve the built site and Functions with local R2 storage.
 
 The Vite-only `pnpm dev` command is useful for visual frontend work, but
@@ -16,10 +16,10 @@ version from the lockfile.
 
 ## Cloudflare deployment
 
-- Create private `annotate-shares` and `annotate-shares-preview` R2 buckets, or update the names in `wrangler.toml`.
+- Create private `a-shares` and `a-shares-preview` R2 buckets, or update the names in `wrangler.toml`.
 - Configure the Pages project with the `SHARES` R2 binding and set `APP_ORIGIN` plus the comma-separated `ALLOWED_UPLOAD_ORIGINS` environment variable.
 - Build with `pnpm build` and publish `dist`; Pages discovers the route handlers under `functions/`.
-- Replace the placeholder app origin in `../extension/config.js` and set the production `VITE_CHROME_STORE_URL` value before the coordinated launch.
+- Replace the placeholder app origin in `../extension/src/config.js` and set the production `VITE_CHROME_STORE_URL` value before the coordinated launch.
 - Keep the R2 bucket private. Browsers upload only to the Pages Function and never receive R2 credentials.
 
 ## Upload protection

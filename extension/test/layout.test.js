@@ -1,5 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+
+const layoutPath = path.resolve(__dirname, "../src/layout.js");
+vm.runInThisContext(fs.readFileSync(layoutPath, "utf8"), { filename: layoutPath });
 const {
   OUTLINE_PADDING,
   VIEWPORT_GUTTER,
@@ -7,7 +13,9 @@ const {
   connectorGeometry,
   expandRect,
   manualPositionMatchesViewport,
-} = require("../layout.js");
+  setConnectorVisible,
+} = globalThis.ANoteLayout;
+delete globalThis.ANoteLayout;
 
 test("expandRect surrounds every side with the configured outline padding", () => {
   assert.equal(OUTLINE_PADDING, 5);
@@ -62,6 +70,22 @@ test("manual positions only apply at the viewport width where they were saved", 
   assert.equal(manualPositionMatchesViewport(position, 1440), true);
   assert.equal(manualPositionMatchesViewport(position, 1280), false);
   assert.equal(manualPositionMatchesViewport({ left: 1, top: 2 }, 1440), false);
+});
+
+test("connector visibility toggles an SVG-compatible hidden attribute", () => {
+  const attributes = new Set();
+  const connector = {
+    toggleAttribute(name, force) {
+      if (force) attributes.add(name);
+      else attributes.delete(name);
+    },
+  };
+
+  setConnectorVisible(connector, false);
+  assert.equal(attributes.has("hidden"), true);
+
+  setConnectorVisible(connector, true);
+  assert.equal(attributes.has("hidden"), false);
 });
 
 test("connectorGeometry joins the closest facing sides with a curved path", () => {

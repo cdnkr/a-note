@@ -40,7 +40,7 @@ describe("share API client", () => {
       id: SHARE_ID,
       targetUrl: "https://example.com",
       createdAt: "2026-07-15T00:00:00.000Z",
-      screenshotUrl: `https://annotate.example/api/shares/${SHARE_ID}/image`,
+      screenshotUrl: `https://a-note.example/api/shares/${SHARE_ID}/image`,
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(record)));
     await expect(fetchShareRecord(SHARE_ID)).resolves.toEqual(record);

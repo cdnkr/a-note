@@ -66,7 +66,7 @@ class MemoryR2 {
 function env(bucket = new MemoryR2()): Env & { SHARES: R2Bucket } {
   return {
     SHARES: bucket as unknown as R2Bucket,
-    APP_ORIGIN: "https://annotate.example",
+    APP_ORIGIN: "https://a-note.example",
     ALLOWED_UPLOAD_ORIGINS: `${ALLOWED_ORIGIN},http://localhost:5173`,
   };
 }
@@ -85,9 +85,9 @@ function uploadRequest(overrides: {
     form.set("comment", "This heading needs more energy.");
   }
   form.set("screenshot", overrides.screenshot ?? new File(["jpeg-bytes"], "annotation.jpg", { type: "image/jpeg" }));
-  const headers = new Headers({ "X-Annotate-Client": overrides.client ?? "extension-v1" });
+  const headers = new Headers({ "X-a-Client": overrides.client ?? "extension-v1" });
   if (overrides.origin !== null) headers.set("Origin", overrides.origin ?? ALLOWED_ORIGIN);
-  return new Request("https://annotate.example/api/shares", { method: "POST", headers, body: form });
+  return new Request("https://a-note.example/api/shares", { method: "POST", headers, body: form });
 }
 
 describe("createShare", () => {
@@ -97,8 +97,8 @@ describe("createShare", () => {
     expect(response.status).toBe(201);
     const payload = await response.json() as { id: string; shareUrl: string; screenshotUrl: string };
     expect(payload.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(payload.shareUrl).toBe(`https://annotate.example/s/${payload.id}`);
-    expect(payload.screenshotUrl).toBe(`https://annotate.example/api/shares/${payload.id}/image`);
+    expect(payload.shareUrl).toBe(`https://a-note.example/s/${payload.id}`);
+    expect(payload.screenshotUrl).toBe(`https://a-note.example/api/shares/${payload.id}/image`);
     expect([...bucket.entries.keys()].sort()).toEqual([
       `shares/${payload.id}/metadata.json`,
       `shares/${payload.id}/screenshot.jpg`,
@@ -149,7 +149,7 @@ describe("share reads", () => {
     const created = await createShare(uploadRequest(), runtimeEnv);
     const { id } = await created.json() as { id: string };
 
-    const metadata = await getShare(new Request(`https://annotate.example/api/shares/${id}`), runtimeEnv, id);
+    const metadata = await getShare(new Request(`https://a-note.example/api/shares/${id}`), runtimeEnv, id);
     expect(metadata.status).toBe(200);
     await expect(metadata.json()).resolves.toMatchObject({
       version: 2,
@@ -157,7 +157,7 @@ describe("share reads", () => {
       targetUrl: "https://example.com/page?x=real#hero",
     });
 
-    const image = await getScreenshot(new Request(`https://annotate.example/api/shares/${id}/image`), runtimeEnv, id);
+    const image = await getScreenshot(new Request(`https://a-note.example/api/shares/${id}/image`), runtimeEnv, id);
     expect(image.status).toBe(200);
     expect(image.headers.get("Content-Type")).toBe("image/jpeg");
     expect(image.headers.get("Cache-Control")).toContain("immutable");
@@ -180,7 +180,7 @@ describe("share reads", () => {
       screenshotKey: `shares/${id}/screenshot.jpg`,
     }));
 
-    const response = await getShare(new Request(`https://annotate.example/api/shares/${id}`), runtimeEnv, id);
+    const response = await getShare(new Request(`https://a-note.example/api/shares/${id}`), runtimeEnv, id);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       version: 1,
@@ -192,9 +192,9 @@ describe("share reads", () => {
 
   it("returns deliberate errors for invalid and missing records", async () => {
     const runtimeEnv = env();
-    expect((await getShare(new Request("https://annotate.example/api/shares/invalid"), runtimeEnv, "invalid")).status).toBe(400);
+    expect((await getShare(new Request("https://a-note.example/api/shares/invalid"), runtimeEnv, "invalid")).status).toBe(400);
     expect((await getShare(
-      new Request("https://annotate.example/api/shares/AbCdEfGhIjKlMnOpQrStUv"),
+      new Request("https://a-note.example/api/shares/AbCdEfGhIjKlMnOpQrStUv"),
       runtimeEnv,
       "AbCdEfGhIjKlMnOpQrStUv",
     )).status).toBe(404);

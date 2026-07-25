@@ -1,5 +1,5 @@
 {
-  "name": "annotate-web",
+  "name": "a-web",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "brand:generate": "node scripts/generate-brand-assets.mjs",
+    "brand:check": "node scripts/generate-brand-assets.mjs --check",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,6 +17,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250715.0",
     "jsdom": "^26.1.0",
+    "sharp": "^0.34.5",
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
     "vitest": "^3.2.4",

@@ -1,9 +1,14 @@
 {
-  "name": "annotate-extension",
+  "name": "a-note-extension",
   "version": "1.0.0",
   "private": true,
   "description": "A local-first webpage annotation Chrome extension.",
   "scripts": {
-    "test": "node --test"
+    "build": "vite build",
+    "build:watch": "vite build --watch",
+    "test": "npm run build && node --test"
+  },
+  "devDependencies": {
+    "vite": "^7.3.6"
   }
 }

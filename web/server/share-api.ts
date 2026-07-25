@@ -62,7 +62,7 @@ export async function createShare(request: Request, env: Env): Promise<Response>
   if (request.method === "OPTIONS") return preflight(origin);
   if (request.method !== "POST") return withCors(apiError("method_not_allowed", "Method not allowed.", 405), origin);
 
-  const client = request.headers.get("X-Annotate-Client");
+  const client = request.headers.get("X-a-Client");
   if (client !== "extension-v1" && client !== "web-v1") {
     return withCors(apiError("client_not_allowed", "This upload client is not allowed.", 403), origin);
   }
@@ -287,7 +287,7 @@ function corsHeaders(origin: string): Headers {
   return new Headers({
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Annotate-Client",
+    "Access-Control-Allow-Headers": "Content-Type, X-a-Client",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   });
