@@ -12,7 +12,7 @@
     "128": "icons/a-cobalt-128.png"
   },
   "action": {
-    "default_title": "Toggle note mode",
+    "default_title": "Toggle A-Note widget",
     "default_icon": {
       "16": "icons/a-cobalt-16.png",
       "24": "icons/a-cobalt-24.png",
@@ -25,7 +25,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["brand.js", "config.js", "lib.js", "layout.js", "widget.js", "content.js"],
+      "js": ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

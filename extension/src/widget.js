@@ -30,6 +30,12 @@
 
   const DRAG_THRESHOLD = 3;
   const TEXT_HIGHLIGHT_ALPHA = 0.24;
+  const LEGACY_SHARE_FIELDS = Object.freeze([
+    "shareId",
+    "shareUrl",
+    "screenshotUrl",
+    "sharedAt",
+  ]);
   const EXCALIFONT_SUBSETS = [
     {
       file: "Excalifont-Regular-a88b72a24fb54c9f94e3b5fdaa7481c9.woff2",
@@ -70,7 +76,7 @@
     annotations: [],
     active: false,
     selectionMode: null,
-    sharingIds: new Set(),
+    capturingIds: new Set(),
     capturing: false,
     preview: null,
     colorId: DEFAULT_COLOR_ID,
@@ -125,11 +131,6 @@
             <button class="preview-download preview-action" type="button" aria-label="Download screenshot" title="Download screenshot">${icon("download")}</button>
           </div>
         </div>
-        <div class="preview-link">
-          <span class="sr-only">Screenshot share link</span>
-          <input type="text" readonly aria-label="Screenshot share link">
-          <button class="preview-copy" type="button" aria-label="Copy screenshot link">${icon("copy")}<span>Copy</span></button>
-        </div>
       </section>
       <section class="color-picker" hidden aria-label="Choose annotation colour">
         <button class="color-picker-close ghost-icon" type="button" aria-label="Close colour selector">${icon("close")}</button>
@@ -147,7 +148,7 @@
         <button class="toolbar-action highlighter-button has-tooltip${textHighlightAvailable ? "" : " is-unavailable"}" type="button" aria-label="${textHighlightAvailable ? "Highlight text" : "Highlight text — unavailable in this browser"}" aria-pressed="false" ${textHighlightAvailable ? "" : "disabled"}>
           ${icon("highlighter")}
         </button>
-        <button class="toolbar-action screenshot-button has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" aria-label="${captureAvailable ? "Capture viewport" : "Capture viewport — available in the Chrome extension"}" ${captureAvailable ? "" : "disabled"}>
+        <button class="toolbar-action screenshot-button has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" aria-label="${captureAvailable ? "Screenshot notes in view" : "Screenshot notes in view — available in the Chrome extension"}" ${captureAvailable ? "" : "disabled"}>
           ${icon("screenshot")}
         </button>
         <button class="toolbar-action close-mode" type="button" aria-label="Close annotate mode" title="Close annotate mode">
@@ -175,8 +176,6 @@
     previewClose: shadow.querySelector(".preview-close"),
     previewShare: shadow.querySelector(".preview-share"),
     previewDownload: shadow.querySelector(".preview-download"),
-    previewLink: shadow.querySelector(".preview-link input"),
-    previewCopy: shadow.querySelector(".preview-copy"),
     colorPicker: shadow.querySelector(".color-picker"),
     colorPickerClose: shadow.querySelector(".color-picker-close"),
     colorGrid: shadow.querySelector(".color-grid"),
@@ -270,7 +269,7 @@
 
     function bindUi() {
     ui.closeMode.addEventListener("click", () => setActive(false));
-    if (captureAvailable) ui.screenshotButton.addEventListener("click", captureViewportShare);
+    if (captureAvailable) ui.screenshotButton.addEventListener("click", captureViewport);
     if (launcherEnabled) ui.launcher.addEventListener("click", () => setActive(true));
     ui.startButton.addEventListener("click", () => {
       setSelectionMode(state.selectionMode === "element" ? null : "element");
@@ -283,8 +282,6 @@
     ui.previewClose.addEventListener("click", closePreview);
     ui.previewShare.addEventListener("click", sharePreview);
     ui.previewDownload.addEventListener("click", downloadPreview);
-    ui.previewCopy.addEventListener("click", copyPreviewLink);
-    ui.previewLink.addEventListener("focus", () => ui.previewLink.select());
     ui.colorButton.addEventListener("click", () => setColorPickerOpen(!state.colorPickerOpen));
     ui.colorPickerClose.addEventListener("click", () => setColorPickerOpen(false));
     ui.colorGrid.addEventListener("click", (event) => {
@@ -790,57 +787,41 @@
     showToast("Annotation removed");
   }
 
-  async function shareAnnotation(annotation) {
-    if (!captureAvailable || !annotation || state.capturing || state.sharingIds.has(annotation.id)) return;
+  async function captureAnnotation(annotation) {
+    if (!captureAvailable || !annotation || state.capturing || state.capturingIds.has(annotation.id)) return;
     const target = resolveAnnotationTarget(annotation);
     if (!target) {
       showToast("Annotation target not found — screenshot unavailable");
       return;
     }
 
-    state.sharingIds.add(annotation.id);
-    setPageShareButtonState(annotation.id, true);
+    state.capturingIds.add(annotation.id);
+    setPageCaptureButtonState(annotation.id, true);
     try {
       await enterNoteCaptureMode(target, annotation.id);
-      const response = await createScreenshotShare();
-      if (!response?.ok || !response.share?.shareUrl) {
-        if (response?.screenshotDataUrl) {
-          openPreview({ imageUrl: response.screenshotDataUrl, shareUrl: "", kind: "note" });
-        }
-        throw new Error(response?.error || "Could not create share link");
+      const response = await captureScreenshot("note");
+      if (!response?.ok || !isScreenshotFile(response.file)) {
+        throw new Error(response?.error || "Could not capture this annotation");
       }
-      Object.assign(annotation, response.share);
-      await saveAnnotations();
-      openPreview({
-        imageUrl: response.screenshotDataUrl || annotation.screenshotUrl,
-        shareUrl: annotation.shareUrl,
-        kind: "note",
-      });
+      openPreview({ file: response.file, kind: "note" });
     } catch (error) {
-      showToast(error?.message || "Could not create share link");
+      showToast(error?.message || "Could not capture this annotation");
     } finally {
       exitCaptureMode();
-      state.sharingIds.delete(annotation.id);
-      setPageShareButtonState(annotation.id, false);
+      state.capturingIds.delete(annotation.id);
+      setPageCaptureButtonState(annotation.id, false);
     }
   }
 
-  async function captureViewportShare() {
+  async function captureViewport() {
     if (!captureAvailable || state.capturing) return;
     try {
       await enterViewportCaptureMode();
-      const response = await createScreenshotShare();
-      const imageUrl = response?.screenshotDataUrl || response?.share?.screenshotUrl;
-      if (imageUrl) {
-        openPreview({
-          imageUrl,
-          shareUrl: response?.ok ? response.share?.shareUrl || "" : "",
-          kind: "viewport",
-        });
+      const response = await captureScreenshot("viewport");
+      if (!response?.ok || !isScreenshotFile(response.file)) {
+        throw new Error(response?.error || "Could not capture this viewport");
       }
-      if (!response?.ok || !response.share?.shareUrl) {
-        throw new Error(response?.error || "Could not create share link");
-      }
+      openPreview({ file: response.file, kind: "viewport" });
     } catch (error) {
       showToast(error?.message || "Could not capture this viewport");
     } finally {
@@ -848,18 +829,25 @@
     }
   }
 
-  function createScreenshotShare() {
-    return environment.capture({
-      targetUrl: pageKey,
-      colorToken: state.colorId,
-    });
+  function captureScreenshot(kind) {
+    return environment.capture({ kind });
   }
 
-  function setPageShareButtonState(id, sharing) {
-    const button = ui.pins.querySelector(`[data-page-share="${cssEscape(id)}"]`);
+  function isScreenshotFile(file) {
+    return Boolean(
+      file
+      && typeof file === "object"
+      && file.type === "image/jpeg"
+      && Number.isFinite(file.size)
+      && file.size > 0,
+    );
+  }
+
+  function setPageCaptureButtonState(id, capturing) {
+    const button = ui.pins.querySelector(`[data-page-capture="${cssEscape(id)}"]`);
     if (!button) return;
-    button.disabled = !captureAvailable || sharing || state.capturing;
-    button.setAttribute("aria-busy", String(sharing));
+    button.disabled = !captureAvailable || capturing || state.capturing;
+    button.setAttribute("aria-busy", String(capturing));
   }
 
   async function enterNoteCaptureMode(target, annotationId) {
@@ -931,8 +919,8 @@
     ui.colorButton.disabled = busy;
     ui.startButton.disabled = busy;
     ui.highlighterButton.disabled = !textHighlightAvailable || busy;
-    ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
-      button.disabled = !captureAvailable || busy || state.sharingIds.has(button.dataset.pageShare);
+    ui.pins.querySelectorAll("[data-page-capture]").forEach((button) => {
+      button.disabled = !captureAvailable || busy || state.capturingIds.has(button.dataset.pageCapture);
     });
   }
 
@@ -1002,106 +990,79 @@
 
   function openPreview(preview) {
     clearTimeout(previewHideTimer);
-    state.preview = preview;
-    ui.previewImage.src = preview.imageUrl;
-    ui.previewLink.value = preview.shareUrl;
-    const linkUnavailable = !preview.shareUrl;
-    ui.previewShare.disabled = linkUnavailable;
-    ui.previewCopy.disabled = linkUnavailable;
-    ui.previewLink.disabled = linkUnavailable;
-    ui.previewLink.placeholder = linkUnavailable ? "Share link unavailable" : "";
+    disposePreview(state.preview);
+    const imageUrl = URL.createObjectURL(preview.file);
+    state.preview = { ...preview, imageUrl };
+    ui.previewImage.src = imageUrl;
+    const shareAvailable = canNativeShareFile(preview.file);
+    const shareLabel = shareAvailable
+      ? "Share screenshot"
+      : "Native sharing unavailable — download instead";
+    ui.previewShare.disabled = !shareAvailable;
+    ui.previewShare.setAttribute("aria-label", shareLabel);
+    ui.previewShare.title = shareLabel;
     ui.preview.hidden = false;
     requestAnimationFrame(() => {
-      if (state.preview === preview) ui.preview.classList.add("is-visible");
+      if (state.preview?.imageUrl === imageUrl) ui.preview.classList.add("is-visible");
     });
   }
 
   function closePreview() {
     clearTimeout(previewHideTimer);
+    disposePreview(state.preview);
     state.preview = null;
     ui.preview.classList.remove("is-visible");
     previewHideTimer = setTimeout(() => {
       if (!state.preview) {
         ui.preview.hidden = true;
         ui.previewImage.removeAttribute("src");
-        ui.previewLink.value = "";
       }
     }, 180);
   }
 
   async function sharePreview() {
-    const shareUrl = state.preview?.shareUrl;
-    if (!shareUrl) return;
-    try {
-      const shareData = {
-        title: document.title || "ANoted screenshot",
-        text: "Shared with ANote",
-        url: shareUrl,
-      };
-      const canShare = typeof navigator.share === "function"
-        && (typeof navigator.canShare !== "function" || navigator.canShare(shareData));
-      if (canShare) {
-        try {
-          await navigator.share(shareData);
-          return;
-        } catch (error) {
-          if (error?.name === "AbortError") return;
-        }
-      }
-      await copyText(shareUrl);
-      showToast("Share link copied");
-    } catch (_error) {
-      showToast("Could not share screenshot");
+    const file = state.preview?.file;
+    if (!file) return;
+    if (!canNativeShareFile(file)) {
+      showToast("Native sharing is unavailable — download the screenshot instead");
+      return;
     }
-  }
-
-  async function copyPreviewLink() {
-    const shareUrl = state.preview?.shareUrl;
-    if (!shareUrl) return;
     try {
-      await copyText(shareUrl);
-      showToast("Share link copied");
-    } catch (_error) {
-      showToast("Could not copy share link");
+      await navigator.share({ files: [file] });
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        showToast("Could not share screenshot — download it instead");
+      }
     }
   }
 
   async function downloadPreview() {
     const preview = state.preview;
-    if (!preview?.imageUrl) return;
+    if (!preview?.file || !preview.imageUrl) return;
     try {
-      let href = preview.imageUrl;
-      let objectUrl = "";
-      if (!href.startsWith("data:")) {
-        const response = await fetch(href, { credentials: "omit" });
-        if (!response.ok) throw new Error("Screenshot download failed");
-        objectUrl = URL.createObjectURL(await response.blob());
-        href = objectUrl;
-      }
       const link = document.createElement("a");
-      const hostName = new URL(pageKey).hostname.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
-      link.href = href;
-      link.download = `a-${preview.kind}-${hostName || "page"}.jpg`;
+      link.href = preview.imageUrl;
+      link.download = preview.file.name || `a-note-${preview.kind}-page.jpg`;
       shadow.append(link);
       link.click();
       link.remove();
-      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     } catch (error) {
       showToast(error?.message || "Could not download screenshot");
     }
   }
 
-  async function copyText(value) {
+  function canNativeShareFile(file) {
     try {
-      await navigator.clipboard.writeText(value);
+      return typeof navigator.share === "function"
+        && typeof navigator.canShare === "function"
+        && navigator.canShare({ files: [file] });
     } catch (_error) {
-      const input = document.createElement("textarea");
-      input.value = value;
-      document.body.append(input);
-      input.select();
-      document.execCommand("copy");
-      input.remove();
+      return false;
     }
+  }
+
+  function disposePreview(preview) {
+    if (preview?.imageUrl) URL.revokeObjectURL(preview.imageUrl);
   }
 
   function resolveElement(xpath) {
@@ -1246,7 +1207,7 @@
     ui.pins.innerHTML = state.annotations.map((annotation) => {
       const target = resolveAnnotationTarget(annotation);
       if (!target) return "";
-      const sharing = state.sharingIds.has(annotation.id);
+      const capturing = state.capturingIds.has(annotation.id);
       return `
         <svg class="annotation-connector" data-connector="${escapeHtml(annotation.id)}" aria-hidden="true"><path></path></svg>
         ${target.type === "element" ? `<div class="element-highlight" data-highlight="${escapeHtml(annotation.id)}" aria-hidden="true"></div>` : ""}
@@ -1255,7 +1216,7 @@
           <article class="page-comment" data-page-comment="${escapeHtml(annotation.id)}">
             <span class="page-comment-copy">${escapeHtml(annotation.content)}</span>
             <span class="page-comment-actions">
-              <button class="page-comment-action page-comment-share has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" data-page-share="${escapeHtml(annotation.id)}" aria-label="${captureAvailable ? "Capture screenshot" : "Capture screenshot — available in the Chrome extension"}" aria-busy="${sharing}" ${captureAvailable && !sharing ? "" : "disabled"}>${icon("screenshot")}</button>
+              <button class="page-comment-action page-comment-capture has-tooltip${captureAvailable ? "" : " is-unavailable"}" type="button" data-page-capture="${escapeHtml(annotation.id)}" aria-label="${captureAvailable ? "Screenshot with note" : "Screenshot with note — available in the Chrome extension"}" aria-busy="${capturing}" ${captureAvailable && !capturing ? "" : "disabled"}>${icon("screenshot")}</button>
               <button class="page-comment-action page-comment-delete has-tooltip" type="button" data-page-delete="${escapeHtml(annotation.id)}" aria-label="Delete annotation">${icon("close")}</button>
             </span>
           </article>
@@ -1264,8 +1225,8 @@
     }).join("");
 
     if (captureAvailable) {
-      ui.pins.querySelectorAll("[data-page-share]").forEach((button) => {
-        button.addEventListener("click", () => shareAnnotation(findAnnotation(button.dataset.pageShare)));
+      ui.pins.querySelectorAll("[data-page-capture]").forEach((button) => {
+        button.addEventListener("click", () => captureAnnotation(findAnnotation(button.dataset.pageCapture)));
       });
     }
     ui.pins.querySelectorAll("[data-page-delete]").forEach((button) => {
@@ -1446,12 +1407,28 @@
   }
 
   async function loadAnnotations() {
+    let stored;
     try {
-      const stored = await environment.loadAnnotations?.(pageKey);
-      return Array.isArray(stored) ? stored : [];
+      stored = await environment.loadAnnotations?.(pageKey);
     } catch (_error) {
       return [];
     }
+    if (!Array.isArray(stored)) return [];
+
+    const hasLegacyShareData = stored.some((annotation) => (
+      annotation
+      && typeof annotation === "object"
+      && LEGACY_SHARE_FIELDS.some((field) => Object.hasOwn(annotation, field))
+    ));
+    const annotations = stored.map(localAnnotation);
+    if (hasLegacyShareData) {
+      try {
+        await environment.saveAnnotations?.(pageKey, annotations);
+      } catch (_error) {
+        // The in-memory annotation schema is still local-only if persistence fails.
+      }
+    }
+    return annotations;
   }
 
   async function loadAnnotationColor() {
@@ -1485,8 +1462,15 @@
   }
 
   function saveAnnotations() {
-    const annotations = state.annotations.map((annotation) => ({ ...annotation }));
+    const annotations = state.annotations.map(localAnnotation);
     return Promise.resolve(environment.saveAnnotations?.(pageKey, annotations));
+  }
+
+  function localAnnotation(annotation) {
+    if (!annotation || typeof annotation !== "object") return annotation;
+    const local = { ...annotation };
+    LEGACY_SHARE_FIELDS.forEach((field) => delete local[field]);
+    return local;
   }
 
   function showToast(message) {
@@ -1532,11 +1516,9 @@
       highlighter: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-highlighter-icon lucide-highlighter"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>',
       close: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x-icon lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
       "arrow-right": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-right-icon lucide-arrow-right"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>',
-      link: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/></svg>',
       share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4m-7.6 6.8 7.6 4.4"/></svg>',
       screenshot: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-fullscreen-icon lucide-fullscreen"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect width="10" height="8" x="7" y="8" rx="1"/></svg>',
       download: '<svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg>',
-      copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
       warning: '<svg viewBox="0 0 24 24"><path d="m12 3 9 17H3L12 3Z"/><path d="M12 9v4m0 3h.01"/></svg>',
       cursor: '<svg viewBox="0 0 24 24"><path d="m5 3 14 9-6 1-3 6L5 3Z"/></svg>',
     };
@@ -1576,7 +1558,7 @@
       .brand-mark { flex: 0 0 auto; width: 42px; height: 42px; display: block; }
       .toolbar-action { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.05); color: var(--ash); display: grid; place-items: center; cursor: pointer; transition: background .16s ease, color .16s ease; }
       .toolbar-action:hover:not(:disabled) { background: rgba(0,0,0,.10); color: var(--ink-black); }
-      .toolbar-action:focus-visible, .ghost-icon:focus-visible, .preview-action:focus-visible, .preview-copy:focus-visible { outline: 2px solid rgba(64,92,245,.34); outline-offset: 2px; }
+      .toolbar-action:focus-visible, .ghost-icon:focus-visible, .preview-action:focus-visible { outline: 2px solid rgba(64,92,245,.34); outline-offset: 2px; }
       .toolbar-action:disabled { opacity: .48; cursor: wait; }
       .toolbar-action.is-unavailable:disabled, .page-comment-action.is-unavailable:disabled { cursor: not-allowed; }
       .toolbar-action svg { width: 21px; height: 21px; }
@@ -1598,14 +1580,6 @@
       .preview-action:hover:not(:disabled) { background: var(--snow); color: var(--ink-black); }
       .preview-action:disabled { opacity: .46; cursor: not-allowed; }
       .preview-action svg { width: 15px; height: 15px; }
-      .preview-link { position: relative; display: block; }
-      .preview-link input { width: 100%; height: 42px; padding: 0 76px 0 12px; border: 1px solid var(--line); border-radius: 12px; outline: none; background: var(--canvas); color: var(--graphite); font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
-      .preview-link input:focus { border-color: rgba(64,92,245,.45); box-shadow: 0 0 0 3px rgba(64,92,245,.10); }
-      .preview-link input:disabled { color: var(--ash); }
-      .preview-copy { position: absolute; right: 5px; top: 5px; height: 32px; padding: 0 9px; border: 0; border-radius: 9px; display: inline-flex; align-items: center; gap: 5px; background: var(--snow); color: var(--graphite); font-size: 9px; font-weight: 800; cursor: pointer; box-shadow: 0 2px 8px rgba(17,26,46,.08); }
-      .preview-copy:hover:not(:disabled) { color: var(--ink-black); }
-      .preview-copy:disabled { opacity: .45; cursor: not-allowed; }
-      .preview-copy svg { width: 14px; height: 14px; }
       .color-picker { min-height: 188px; padding: 18px; }
       .color-picker h3 { margin: 0 42px 18px 1px; color: var(--ink-black); font-size: 13px; font-weight: 750; letter-spacing: -.15px; }
       .color-picker-close { position: absolute; z-index: 2; top: 12px; right: 12px; box-shadow: none; background: var(--canvas); }

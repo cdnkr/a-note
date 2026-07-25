@@ -5,23 +5,7 @@
   "use strict";
 
   const MAX_CONTENT_LENGTH = 240;
-  const SHARE_ID_PARAM = "aNoteShare";
-  const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
-  const SHARE_COLOR_PARAM = "c";
-  const SHARE_COLOR_TOKENS = Object.freeze([
-    "cobalt",
-    "indigo",
-    "violet",
-    "purple",
-    "pink",
-    "red",
-    "orange",
-    "yellow",
-    "lime",
-    "green",
-    "teal",
-    "slate",
-  ]);
+  const LEGACY_SHARE_ID_PARAM = "aNoteShare";
   const XPATH_SEGMENT_SEPARATOR = "|";
   const XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
   const MAX_ANCESTOR_DEPTH = 10;
@@ -81,38 +65,10 @@
 
   function pageUrl(value) {
     const url = new URL(value);
-    url.searchParams.delete(SHARE_ID_PARAM);
+    // Old extension versions added this query parameter when opening a share.
+    // Keep stripping it so those visits continue to resolve existing local notes.
+    url.searchParams.delete(LEGACY_SHARE_ID_PARAM);
     return url.toString();
-  }
-
-  function sharePageUrl(origin, shareId, colorToken) {
-    if (!isShareId(shareId)) throw new TypeError("Invalid share ID");
-    const url = new URL(`/s/${shareId}`, ensureOrigin(origin));
-    return withShareColor(url, colorToken);
-  }
-
-  function isShareId(value) {
-    return SHARE_ID_PATTERN.test(String(value));
-  }
-
-  function isShareColorToken(value) {
-    return SHARE_COLOR_TOKENS.includes(String(value));
-  }
-
-  function withShareColor(value, colorToken) {
-    const url = new URL(value);
-    if (isShareColorToken(colorToken)) {
-      url.searchParams.set(SHARE_COLOR_PARAM, String(colorToken));
-    } else {
-      url.searchParams.delete(SHARE_COLOR_PARAM);
-    }
-    return url.toString();
-  }
-
-  function ensureOrigin(value) {
-    const url = new URL(value);
-    if (!/^https?:$/.test(url.protocol)) throw new TypeError("Invalid web app origin");
-    return url.origin;
   }
 
   function xpathLiteral(value) {
@@ -942,23 +898,14 @@
 
   return {
     MAX_CONTENT_LENGTH,
-    SHARE_COLOR_PARAM,
-    SHARE_COLOR_TOKENS,
-    SHARE_ID_PARAM,
-    SHARE_ID_PATTERN,
-    ensureOrigin,
-    isShareColorToken,
-    isShareId,
     isTextTarget,
     pageUrl,
     findTextQuoteOffset,
     resolveXPath,
     resolveTextTarget,
-    sharePageUrl,
     splitCompoundXPath,
     textTargetForRange,
     textTargetKey,
-    withShareColor,
     isStableClass,
     isStableId,
     xpathForElement,

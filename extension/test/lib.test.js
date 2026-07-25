@@ -11,22 +11,17 @@ const {
   findTextQuoteOffset,
   isStableClass,
   isStableId,
-  isShareColorToken,
-  isShareId,
   isTextTarget,
   pageUrl,
   resolveXPath,
   resolveTextTarget,
-  sharePageUrl,
   splitCompoundXPath,
   textTargetForRange,
   textTargetKey,
-  withShareColor,
   xpathForElement,
   xpathLiteral,
 } = globalThis.ANoteLib;
 delete globalThis.ANoteLib;
-const palette = require("../../web/brand/palette.json");
 
 const SHARE_ID = "AbCdEfGhIjKlMnOpQrStUv";
 
@@ -35,33 +30,6 @@ test("pageUrl removes only aNoteShare and preserves path, search, and hash", () 
     pageUrl(`https://example.com/path?plan=pro&x=%2Fhtml&c=hello&aNoteShare=${SHARE_ID}#pricing`),
     "https://example.com/path?plan=pro&x=%2Fhtml&c=hello#pricing",
   );
-});
-
-test("share IDs and share-page URLs are validated", () => {
-  assert.equal(isShareId(SHARE_ID), true);
-  assert.equal(isShareId("too-short"), false);
-  assert.equal(sharePageUrl("https://a-note.example/path", SHARE_ID), `https://a-note.example/s/${SHARE_ID}`);
-  assert.equal(
-    sharePageUrl("https://a-note.example/path", SHARE_ID, "orange"),
-    `https://a-note.example/s/${SHARE_ID}?c=orange`,
-  );
-});
-
-test("share-page URLs include only supported colour tokens", () => {
-  assert.equal(isShareColorToken("teal"), true);
-  assert.equal(isShareColorToken("chartreuse"), false);
-  assert.equal(
-    withShareColor(`https://a-note.example/s/${SHARE_ID}?source=extension`, "teal"),
-    `https://a-note.example/s/${SHARE_ID}?source=extension&c=teal`,
-  );
-  assert.equal(
-    withShareColor(`https://a-note.example/s/${SHARE_ID}?c=teal`, "chartreuse"),
-    `https://a-note.example/s/${SHARE_ID}`,
-  );
-});
-
-test("share colour tokens stay aligned with the canonical brand palette", () => {
-  palette.colors.forEach((color) => assert.equal(isShareColorToken(color.id), true));
 });
 
 test("content length remains 240 characters", () => {

@@ -15,7 +15,6 @@
     "pages:dev": "wrangler pages dev dist"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250715.0",
     "jsdom": "^26.1.0",
     "sharp": "^0.34.5",
     "typescript": "^5.8.3",

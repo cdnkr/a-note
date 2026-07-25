@@ -43,12 +43,31 @@
           // Dragging continues in memory when page storage is unavailable.
         }
       },
-      capture({ targetUrl, colorToken }) {
-        return chrome.runtime.sendMessage({
-          type: "ANOTE_CAPTURE_AND_CREATE_SHARE",
-          targetUrl,
-          colorToken,
-        });
+      async capture({ kind }) {
+        try {
+          const response = await chrome.runtime.sendMessage({
+            type: "ANOTE_CAPTURE_SCREENSHOT",
+          });
+          if (!response?.ok || !response.screenshotDataUrl) return response;
+
+          const screenshotResponse = await fetch(response.screenshotDataUrl);
+          const screenshotBlob = await screenshotResponse.blob();
+          if (screenshotBlob.type !== "image/jpeg" || screenshotBlob.size === 0) {
+            throw new Error("Chrome returned an invalid screenshot");
+          }
+          return {
+            ok: true,
+            file: new File([screenshotBlob], screenshotFileName(kind), {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            }),
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            error: error?.message || "Could not capture this viewport",
+          };
+        }
       },
       activeChanged(active) {
         chrome.runtime.sendMessage({ type: "ANOTE_ACTIVE_CHANGED", active }).catch(() => {});
@@ -65,4 +84,13 @@
       sendResponse({ ok: true, ...widget.status() });
     }
   });
+
+  function screenshotFileName(kind) {
+    const isSingleNote = kind === "note";
+    const safeHostname = location.hostname
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    return `${isSingleNote ? "a-" : ""}note${!isSingleNote ? "s" : ""}-on-${safeHostname || "a-page"}.jpg`;
+  }
 })();

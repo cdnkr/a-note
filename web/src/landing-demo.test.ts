@@ -105,8 +105,8 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     "Like this",
     "Change this image",
     "Fix these typos",
-    "Choose the element tool to try it on this page",
-    "Simply add to Chrome and use anywhere",
+    "Try it on this page",
+    "Simply add to Chrome\nand use on any page",
   ]));
   [
     "landing-like-this",
@@ -114,15 +114,12 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     "landing-fix-typos",
     "landing-add-button",
     "landing-install",
+    "landing-highlight-text",
   ].forEach((id) => {
     expect(
       firstShadow!.querySelector(`[data-anchor="${id}"]`)?.getAttribute("data-placement"),
     ).toBe("manual");
   });
-  expect(
-    firstShadow!.querySelector('[data-anchor="landing-highlight-text"]')
-      ?.getAttribute("data-placement"),
-  ).not.toBe("manual");
   expect(firstShadow!.querySelector('[data-highlight="landing-highlight-text"]')).toBeNull();
   const imageComment = firstShadow!.querySelector<HTMLElement>(
     '[data-anchor="landing-change-image"]',
@@ -142,8 +139,8 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     }),
   });
   window.dispatchEvent(new Event("resize"));
-  expect(imageComment?.style.left).toBe("327px");
-  expect(imageComment?.style.top).toBe("200px");
+  expect(imageComment?.style.left).toBe("-395px");
+  expect(imageComment?.style.top).toBe("180px");
   expect(imageComment?.dataset.actionSide).toBe("left");
   expect(firstShadow!.querySelector<HTMLElement>(
     '[data-highlight="landing-change-image"]',
@@ -156,8 +153,8 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
   const typoComment = firstShadow!.querySelector<HTMLElement>(
     '[data-anchor="landing-fix-typos"]',
   );
-  expect(typoComment?.style.left).toBe("339px");
-  expect(typoComment?.style.top).toBe("240px");
+  expect(typoComment?.style.left).toBe("295px");
+  expect(typoComment?.style.top).toBe("260px");
   const textHighlight = highlightRegistry.get("a-demo-root-text") as
     | { ranges: Range[] }
     | undefined;
@@ -169,7 +166,7 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
 
   const viewportCapture = firstShadow!.querySelector<HTMLButtonElement>(".screenshot-button");
   const noteCapture = firstShadow!.querySelector<HTMLButtonElement>(
-    '[data-page-share="landing-like-this"]',
+    '[data-page-capture="landing-like-this"]',
   );
   expect(viewportCapture?.disabled).toBe(true);
   expect(noteCapture?.disabled).toBe(true);
@@ -190,7 +187,7 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
   const responsiveSample = firstShadow!.querySelector<HTMLElement>(
     '[data-anchor="landing-like-this"]',
   );
-  expect(responsiveSample?.style.left).toBe("255px");
+  expect(responsiveSample?.style.left).toBe("215px");
   expect(responsiveSample?.style.top).toBe("35px");
   Object.defineProperty(window, "innerWidth", {
     configurable: true,

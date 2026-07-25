@@ -1,6 +1,6 @@
 # A-Note
 
-A local-first Chrome extension for attaching short comments to webpage elements and sharing annotated screenshots through the A-Note web app.
+A local-first Chrome extension for attaching short comments to webpage elements and sharing annotated screenshots with the browser's native share controls.
 
 ## Install locally
 
@@ -17,10 +17,10 @@ A local-first Chrome extension for attaching short comments to webpage elements 
 - New annotations use a ranked XPath candidate strategy: stable unique IDs and test attributes first, then semantic tags, label/text anchors, nearby stable ancestors or siblings, token-safe classes, and finally an absolute path. Every candidate must resolve uniquely to the selected element before it can be stored. SVG steps are namespace-safe, while elements inside open Shadow DOM use a compound host XPath plus deterministic paths within each shadow root.
 - After the `A` mark, the bottom-right toolbar exposes annotation colour, element selection, text highlighting, viewport capture, and close-mode controls in that order; there is no annotation-list panel.
 - The colour control opens a 12-colour palette. The choice is stored globally for the extension and updates every handwritten note, target outline, text highlight, colour indicator, and toolbar `A`; the `A` retains automatic foreground contrast.
-- Saved notes are transparent Excalifont text that shrink to their content up to a 340px maximum. Their neutral Capture screenshot and Delete controls form a horizontal pair immediately beside the text, mirrored to the edge farthest from the target; below-target notes use whichever side has more viewport room. Every Capture screenshot action captures the note and its highlighted element in their current colour and position, uploads a new JPEG, replaces the locally stored link, and opens the screenshot preview.
+- Saved notes are transparent Excalifont text that shrink to their content up to a 340px maximum. Their neutral Capture screenshot and Delete controls form a horizontal pair immediately beside the text, mirrored to the edge farthest from the target; below-target notes use whichever side has more viewport room. Every Capture screenshot action captures the note and its highlighted element in their current colour and position and opens a local screenshot preview.
 - The toolbar screenshot button captures the current viewport with all visible notes. Extension controls fade out before capture, while offscreen and unresolved annotations remain excluded.
-- The screenshot preview provides Share, Download, and Copy Link controls. Viewport previews are temporary, but their uploaded links remain durable.
-- Public share links always display the screenshot in the web app, even when the extension is installed. New links include the active colour token so the share page uses the same primary colour; links without a supported token use cobalt. Shared annotations are no longer imported back onto the original page.
+- The screenshot preview provides Share, Download, and close controls. Share passes the in-memory JPEG file to the browser's native share sheet; Download is the fallback when file sharing is unavailable.
+- Screenshot files are kept in browser memory for the lifetime of the preview. A-Note does not upload them or create public links. Choosing a destination in the native share sheet may pass the file to that destination at the user's direction.
 - Annotations whose XPath no longer resolves remain in local storage and reappear if their target becomes available again.
 - Single-page-app URL changes are detected, so each route keeps its own exact-URL annotation set without a full reload.
 - In active mode, every resolved element has a transparent colour-matched outline offset 5px beyond its bounds, while selected text receives an exact, translucent colour-matched background across every selected line. Comments are shown beside either target, and multiple untouched comments on one target stack vertically.
@@ -47,11 +47,9 @@ Run the build and complete test suite with:
 npm test
 ```
 
-## Web app configuration
+## Screenshot privacy
 
-Update `src/config.js` with the deployed web origin and API URL before publishing. For unpacked local development, add the local extension origin to `web/.dev.vars` and set `src/config.js` to the Wrangler Pages development origin.
-
-The extension never receives R2 credentials. Its background worker captures the active tab and uploads a validated JPEG multipart request to the Cloudflare Pages Function.
+The background worker only captures the active tab and returns the JPEG data to the page-side widget. The widget converts it to a local `File`, creates a temporary object URL for preview/download, and revokes that URL when the preview closes. No screenshot service, API configuration, storage bucket, or third-party account is required.
 
 ## Bundled font
 

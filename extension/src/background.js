@@ -1,13 +1,12 @@
-importScripts("brand.js", "config.js", "lib.js");
+importScripts("brand.js");
 
-const { isShareId, sharePageUrl, withShareColor } = globalThis.ANoteLib;
 const {
   COLOR_STORAGE_KEY,
   DEFAULT_COLOR_ID,
   colorById,
   pngPaths,
 } = globalThis.ANoteBrand;
-const config = globalThis.ANoteConfig;
+const MAX_CAPTURE_DATA_URL_LENGTH = 48 * 1024 * 1024;
 
 updateActionColor(DEFAULT_COLOR_ID).catch(() => {});
 chrome.storage.local.get(COLOR_STORAGE_KEY)
@@ -27,7 +26,7 @@ chrome.action.onClicked.addListener(async (tab) => {
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          files: ["brand.js", "config.js", "lib.js", "layout.js", "widget.js", "content.js"],
+          files: ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
         });
       const response = await chrome.tabs.sendMessage(tab.id, { type: "ANOTE_TOGGLE_ACTIVE" });
       await updateBadge(tab.id, response?.active);
@@ -52,8 +51,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return undefined;
   }
 
-  if (message?.type === "ANOTE_CAPTURE_AND_CREATE_SHARE") {
-    captureAndCreateShare(message, sender)
+  if (message?.type === "ANOTE_CAPTURE_SCREENSHOT") {
+    captureScreenshot(sender)
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -62,63 +61,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return undefined;
 });
 
-async function captureAndCreateShare(message, sender) {
+async function captureScreenshot(sender) {
   if (!sender.tab?.id || !sender.tab.active) throw new Error("The annotated tab is not active");
-  const targetUrl = normaliseTargetUrl(message.targetUrl);
 
   const screenshotDataUrl = await chrome.tabs.captureVisibleTab(sender.tab.windowId, {
     format: "jpeg",
     quality: 90,
   });
-  const screenshot = await (await fetch(screenshotDataUrl)).blob();
-  const form = new FormData();
-  form.set("targetUrl", targetUrl);
-  try {
-    form.set("screenshot", screenshot, "a-screenshot.jpg");
-    const response = await fetch(config.apiBaseUrl, {
-      method: "POST",
-      headers: { "X-a-Client": "extension-v1" },
-      body: form,
-    });
-    const payload = await readJson(response);
-    if (!response.ok) throw new Error(payload?.error?.message || "Could not create the share link");
-    if (!isShareId(payload.id)) throw new Error("The share service returned an invalid ID");
-
-    return {
-      ok: true,
-      screenshotDataUrl,
-      share: {
-        shareId: payload.id,
-        shareUrl: payload.shareUrl
-          ? withShareColor(payload.shareUrl, message.colorToken)
-          : sharePageUrl(config.webAppOrigin, payload.id, message.colorToken),
-        screenshotUrl: payload.screenshotUrl,
-        sharedAt: new Date().toISOString(),
-      },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      screenshotDataUrl,
-      error: error?.message || "Could not create the share link",
-    };
+  if (
+    typeof screenshotDataUrl !== "string"
+    || !screenshotDataUrl.startsWith("data:image/jpeg;base64,")
+  ) {
+    throw new Error("Chrome returned an invalid screenshot");
   }
-}
-
-function normaliseTargetUrl(value) {
-  const url = new URL(String(value));
-  if (!/^https?:$/.test(url.protocol) || url.toString().length > 8192) {
-    throw new Error("Invalid target URL");
+  if (screenshotDataUrl.length > MAX_CAPTURE_DATA_URL_LENGTH) {
+    throw new Error("The captured screenshot is too large");
   }
-  return url.toString();
-}
 
-async function readJson(response) {
-  try {
-    return await response.json();
-  } catch (_error) {
-    return null;
-  }
+  return { ok: true, screenshotDataUrl };
 }
 
 async function updateBadge(tabId, active) {

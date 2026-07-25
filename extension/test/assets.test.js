@@ -15,12 +15,12 @@ const palette = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "web", "bra
 test("brand, layout, and widget helpers load before the content adapter", () => {
   assert.deepEqual(
     manifest.content_scripts[0].js,
-    ["brand.js", "config.js", "lib.js", "layout.js", "widget.js", "content.js"],
+    ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
   );
   const background = fs.readFileSync(path.join(sourceRoot, "background.js"), "utf8");
   assert.match(
     background,
-    /files: \["brand\.js", "config\.js", "lib\.js", "layout\.js", "widget\.js", "content\.js"\]/,
+    /files: \["brand\.js", "lib\.js", "layout\.js", "widget\.js", "content\.js"\]/,
   );
 });
 
@@ -105,7 +105,6 @@ test("the Vite build emits a complete minified extension package", () => {
   const scriptNames = [
     "background.js",
     "brand.js",
-    "config.js",
     "lib.js",
     "layout.js",
     "widget.js",
@@ -126,12 +125,11 @@ test("the Vite build emits a complete minified extension package", () => {
   assert.ok(builtBytes < sourceBytes, "built JavaScript should be smaller than source");
 
   const builtGlobals = vm.createContext({});
-  ["brand.js", "config.js", "lib.js", "layout.js", "widget.js"].forEach((name) => {
+  ["brand.js", "lib.js", "layout.js", "widget.js"].forEach((name) => {
     const script = fs.readFileSync(path.join(distRoot, name), "utf8");
     vm.runInContext(script, builtGlobals, { filename: name });
   });
   assert.ok(builtGlobals.ANoteBrand);
-  assert.ok(builtGlobals.ANoteConfig);
   assert.ok(builtGlobals.ANoteLib);
   assert.ok(builtGlobals.ANoteLayout);
   assert.ok(builtGlobals.ANoteWidget);

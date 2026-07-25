@@ -14,19 +14,13 @@ test("background restores and globally updates the toolbar colour", async () => 
     icons: [],
     badgeBackgrounds: [],
     badgeForegrounds: [],
+    captures: [],
+    fetches: 0,
   };
   let storageListener;
+  let messageListener;
   const context = vm.createContext({
     importScripts() {},
-    ANoteLib: {
-      isShareId() { return true; },
-      sharePageUrl() { return "https://a-note.example/s/id"; },
-      withShareColor(value) { return value; },
-    },
-    ANoteConfig: {
-      apiBaseUrl: "https://a-note.example/api/shares",
-      webAppOrigin: "https://a-note.example",
-    },
     chrome: {
       action: {
         onClicked: { addListener() {} },
@@ -51,22 +45,30 @@ test("background restores and globally updates the toolbar colour", async () => 
       tabs: {
         onUpdated: { addListener() {} },
         async sendMessage() { return { active: false }; },
-        async captureVisibleTab() { return "data:image/jpeg;base64,"; },
+        async captureVisibleTab(windowId, options) {
+          calls.captures.push({ windowId, options });
+          return "data:image/jpeg;base64,anBlZw==";
+        },
       },
       runtime: {
-        onMessage: { addListener() {} },
+        onMessage: {
+          addListener(listener) {
+            messageListener = listener;
+          },
+        },
       },
     },
-    Blob,
     Date,
     Error,
-    FormData,
     Map,
     Object,
     Promise,
     String,
     URL,
-    fetch,
+    fetch() {
+      calls.fetches += 1;
+      throw new Error("Capture should not use the network");
+    },
     globalThis: undefined,
   });
   context.globalThis = context;
@@ -98,6 +100,22 @@ test("background restores and globally updates the toolbar colour", async () => 
   );
   await settle();
   assert.equal(calls.icons.at(-1).path[16], "icons/a-cobalt-16.png");
+
+  const capture = await new Promise((resolve) => {
+    const keepChannelOpen = messageListener(
+      { type: "ANOTE_CAPTURE_SCREENSHOT" },
+      { tab: { id: 12, active: true, windowId: 34 } },
+      resolve,
+    );
+    assert.equal(keepChannelOpen, true);
+  });
+  assert.equal(capture.ok, true);
+  assert.equal(capture.screenshotDataUrl, "data:image/jpeg;base64,anBlZw==");
+  assert.equal(calls.captures.length, 1);
+  assert.equal(calls.captures[0].windowId, 34);
+  assert.equal(calls.captures[0].options.format, "jpeg");
+  assert.equal(calls.captures[0].options.quality, 90);
+  assert.equal(calls.fetches, 0);
 });
 
 function settle() {
