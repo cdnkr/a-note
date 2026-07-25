@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "build:watch": "vite build --watch",
+    "release": "vite build && mkdir -p release && rm -f \"release/${npm_package_name}-${npm_package_version}.zip\" && cd dist && zip -qr \"../release/${npm_package_name}-${npm_package_version}.zip\" . -x '*.DS_Store'",
     "test": "npm run build && node --test"
   },
   "devDependencies": {
