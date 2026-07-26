@@ -27,7 +27,7 @@ if (pathname === PRIVACY_POLICY_PATH) {
 }
 
 function renderLandingPage(root: HTMLElement): void {
-  document.title = "A-Note — Feedback, in context";
+  document.title = "A-Note — Add notes in place, on web pages.";
   root.classList.add("landing-page");
   root.innerHTML = `
     <header class="site-header shell">
