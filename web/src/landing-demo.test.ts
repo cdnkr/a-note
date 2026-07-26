@@ -19,16 +19,23 @@ function nextFrame(): Promise<void> {
 test("homepage demo mounts seeded document and widget annotations as a resettable sandbox", async () => {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener() {},
-      removeEventListener() {},
-      addListener() {},
-      removeListener() {},
-      dispatchEvent: () => false,
-    }),
+    value: (query: string) => {
+      const minimum = /min-width:\s*(\d+)px/.exec(query);
+      const maximum = /max-width:\s*(\d+)px/.exec(query);
+      const matches = !query.includes("prefers-reduced-motion")
+        && (!minimum || window.innerWidth >= Number(minimum[1]))
+        && (!maximum || window.innerWidth <= Number(maximum[1]));
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => false,
+      };
+    },
   });
   renderLandingTargets();
   Object.defineProperty(
@@ -139,8 +146,8 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
     }),
   });
   window.dispatchEvent(new Event("resize"));
-  expect(imageComment?.style.left).toBe("-395px");
-  expect(imageComment?.style.top).toBe("180px");
+  expect(imageComment?.style.left).toBe("325px");
+  expect(imageComment?.style.top).toBe("173px");
   expect(imageComment?.dataset.actionSide).toBe("left");
   expect(firstShadow!.querySelector<HTMLElement>(
     '[data-highlight="landing-change-image"]',
@@ -153,7 +160,7 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
   const typoComment = firstShadow!.querySelector<HTMLElement>(
     '[data-anchor="landing-fix-typos"]',
   );
-  expect(typoComment?.style.left).toBe("295px");
+  expect(typoComment?.style.left).toBe("255px");
   expect(typoComment?.style.top).toBe("260px");
   const textHighlight = highlightRegistry.get("a-demo-root-text") as
     | { ranges: Range[] }
@@ -187,49 +194,44 @@ test("homepage demo mounts seeded document and widget annotations as a resettabl
   const responsiveSample = firstShadow!.querySelector<HTMLElement>(
     '[data-anchor="landing-like-this"]',
   );
-  expect(responsiveSample?.style.left).toBe("215px");
+  expect(responsiveSample?.style.left).toBe("65px");
   expect(responsiveSample?.style.top).toBe("35px");
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
     value: 700,
   });
   window.dispatchEvent(new Event("resize"));
-  expect(responsiveSample?.style.left).toBe("55px");
-  expect(responsiveSample?.style.top).toBe("25px");
-  expect(sample?.style.left).toBe("-25px");
-  expect(sample?.style.top).toBe("-315px");
+  expect(responsiveSample?.style.left).toBe("120px");
+  expect(responsiveSample?.style.top).toBe("-75px");
+  expect(sample?.hidden).toBe(true);
+
+  const tabletPosition = {
+    left: responsiveSample?.style.left,
+    top: responsiveSample?.style.top,
+  };
+  window.dispatchEvent(new Event("resize"));
+  window.dispatchEvent(new Event("resize"));
+  expect({
+    left: responsiveSample?.style.left,
+    top: responsiveSample?.style.top,
+  }).toEqual(tabletPosition);
+  expect(sample?.hidden).toBe(true);
+
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
     value: 500,
   });
   window.dispatchEvent(new Event("resize"));
-  expect(responsiveSample?.style.left).toBe("-65px");
-  expect(responsiveSample?.style.top).toBe("-211px");
-  expect(sample?.style.left).toBe("45px");
-  expect(sample?.style.top).toBe("-5px");
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    value: 700,
-  });
-  window.dispatchEvent(new Event("resize"));
-  expect(responsiveSample?.style.left).toBe("55px");
-  expect(responsiveSample?.style.top).toBe("25px");
-  expect(sample?.style.left).toBe("-25px");
-  expect(sample?.style.top).toBe("-315px");
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    value: 500,
-  });
-  window.dispatchEvent(new Event("resize"));
-  expect(responsiveSample?.style.left).toBe("-65px");
-  expect(responsiveSample?.style.top).toBe("-211px");
-  expect(sample?.style.left).toBe("45px");
-  expect(sample?.style.top).toBe("-5px");
+  expect(responsiveSample?.style.left).toBe("120px");
+  expect(responsiveSample?.style.top).toBe("-75px");
+  expect(sample?.hidden).toBe(true);
+
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
     value: 1024,
   });
   window.dispatchEvent(new Event("resize"));
+  expect(sample?.hidden).toBe(false);
 
   Object.defineProperty(sampleCopy!, "getBoundingClientRect", {
     configurable: true,

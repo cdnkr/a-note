@@ -17,6 +17,7 @@
     commentLayout,
     connectorGeometry,
     expandRect,
+    layoutViewportWidth,
     manualPositionMatchesViewport,
     responsivePosition,
     setConnectorVisible,
@@ -599,7 +600,7 @@
     const minimumTop = window.scrollY + 8;
     const maximumLeft = Math.max(
       minimumLeft,
-      window.scrollX + window.innerWidth - stackWidth - 8,
+      window.scrollX + layoutViewportWidth(window) - stackWidth - 8,
     );
     const maximumTop = Math.max(
       minimumTop,
@@ -617,7 +618,7 @@
     state.manualPositions.set(drag.id, {
       left,
       top,
-      screenWidth: window.innerWidth,
+      screenWidth: layoutViewportWidth(window),
       actionSide: drag.actionSide,
     });
     positionPins();
@@ -935,7 +936,7 @@
     return rect.top >= margin
       && rect.left >= margin
       && rect.bottom <= window.innerHeight - margin
-      && rect.right <= window.innerWidth - margin;
+      && rect.right <= layoutViewportWidth(window) - margin;
   }
 
   function nextPaint() {
@@ -1235,8 +1236,8 @@
     positionPins();
   }
 
-  function annotationPlacement(rect, noteWidth) {
-    const placement = commentLayout(rect, window.innerWidth, noteWidth);
+  function annotationPlacement(rect, noteWidth, viewportWidth = layoutViewportWidth(window)) {
+    const placement = commentLayout(rect, viewportWidth, noteWidth);
     return {
       ...placement,
       left: placement.left + window.scrollX,
@@ -1258,6 +1259,9 @@
 
   function positionPins() {
     if (!state.active) return;
+    // Keep one responsive state for the whole pass. Positioning an off-screen
+    // annotation can otherwise change page overflow while its siblings are laid out.
+    const viewportWidth = layoutViewportWidth(window);
     const automaticOffsets = new Map();
     ui.pins.querySelectorAll(".annotation-stack").forEach((stack) => {
       const annotation = findAnnotation(stack.dataset.anchor);
@@ -1270,15 +1274,21 @@
         setConnectorVisible(connector, false);
         return;
       }
+      const seedPosition = responsivePosition(
+        seedPositions.get(annotation.id),
+        viewportWidth,
+        window.matchMedia?.bind(window),
+      );
       const outlineRect = targetRect(target);
       const targetHidden = target.type === "element"
         ? Boolean(target.element.closest?.("[hidden]"))
         : outlineRect.width <= 0 || outlineRect.height <= 0;
-      const outsideViewport = targetHidden
+      const outsideViewport = seedPosition?.show === false
+        || targetHidden
         || outlineRect.bottom < 0
         || outlineRect.top > window.innerHeight
         || outlineRect.right < 0
-        || outlineRect.left > window.innerWidth;
+        || outlineRect.left > viewportWidth;
       stack.hidden = outsideViewport;
       if (highlight) {
         highlight.hidden = outsideViewport;
@@ -1295,7 +1305,7 @@
       stack.style.removeProperty("width");
       const noteWidth = stack.getBoundingClientRect().width;
       const manualPosition = state.manualPositions.get(annotation.id);
-      if (manualPositionMatchesViewport(manualPosition, window.innerWidth)) {
+      if (manualPositionMatchesViewport(manualPosition, viewportWidth)) {
         stack.dataset.placement = "manual";
         stack.dataset.actionSide = manualPosition.actionSide === "left" ? "left" : "right";
         stack.classList.add("is-manual");
@@ -1305,12 +1315,8 @@
         return;
       }
 
-      const placement = annotationPlacement(outlineRect, noteWidth);
-      const seedPosition = responsivePosition(
-        seedPositions.get(annotation.id),
-        window.innerWidth,
-      );
-      if (seedPosition && (!seedPosition.minWidth || window.innerWidth >= seedPosition.minWidth)) {
+      const placement = annotationPlacement(outlineRect, noteWidth, viewportWidth);
+      if (seedPosition && (!seedPosition.minWidth || viewportWidth >= seedPosition.minWidth)) {
         const actionSide = seedPosition.actionSide === "left"
           || seedPosition.actionSide === "right"
           ? seedPosition.actionSide
@@ -1326,7 +1332,7 @@
           state.manualPositions.set(annotation.id, {
             left,
             top,
-            screenWidth: window.innerWidth,
+            screenWidth: viewportWidth,
             actionSide,
           });
         }

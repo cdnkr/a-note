@@ -111,6 +111,10 @@ header.site-header .brand span {
 
 html {
   scroll-behavior: smooth;
+  /* The demo widget lives outside #app; keep off-screen notes out of page overflow. */
+  overflow-x: clip;
+  /* Prevent a vertical scrollbar from changing the responsive layout width. */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -709,53 +713,6 @@ svg {
 }
 
 @media (max-width: 800px) {
-  .hero {
-    padding: 82px 0 78px;
-  }
-
-  .hero h1 {
-    font-size: clamp(58px, 11vw, 76px);
-  }
-
-  .product-stage {
-    margin-top: 78px;
-    padding: 0 38px;
-  }
-
-  .demo-page {
-    min-height: 440px;
-  }
-
-  .demo-copy {
-    left: 7%;
-    top: 112px;
-    max-width: 300px;
-  }
-
-  .demo-copy h2 {
-    font-size: 31px;
-  }
-
-  .demo-copy p {
-    max-width: 245px;
-  }
-
-  .demo-illustration {
-    right: -3%;
-    top: 73px;
-    width: 49%;
-  }
-
-  .site-footer {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .site-footer p {
-    display: none;
-  }
-}
-
-@media (max-width: 520px) {
 
   #app.landing-page::before,
   #app.landing-page::after {
@@ -798,7 +755,7 @@ svg {
 
   .hero h1 {
     margin-bottom: 22px;
-    font-size: 49px;
+    font-size: 40px;
     line-height: .93;
   }
 
@@ -806,9 +763,13 @@ svg {
     font-size: 14px;
   }
 
+  .hero-actions {
+    margin-top: 48px;
+  }
+
   .product-stage {
     width: 100%;
-    margin-top: 68px;
+    margin-top: 96px;
     padding: 0;
   }
 
@@ -823,6 +784,9 @@ svg {
   .demo-page {
     min-height: 400px;
     padding: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .demo-nav span {
@@ -830,9 +794,14 @@ svg {
   }
 
   .demo-copy {
-    left: 24px;
-    top: 91px;
+    position: relative;
+    display: block;
+    left: 0;
+    top: 0;
     max-width: 220px;
+    order: 2;
+    margin: 0 auto;
+    text-align: center;
   }
 
   .demo-label {
@@ -848,15 +817,24 @@ svg {
   }
 
   .demo-copy p {
-    max-width: 165px;
+    max-width: 220px;
     line-height: 1.4;
+    margin-bottom: 24px;
+  }
+
+  .demo-copy button {
+    display: none;
+    margin-bottom: 24px;
   }
 
   .demo-illustration {
-    right: -75px;
-    top: 96px;
+    order: 1;
+    position: relative;
+    right: 0;
+    top: 0;
     width: 265px;
     opacity: .72;
+    margin: 36px auto;
   }
 
   .scene-caption {

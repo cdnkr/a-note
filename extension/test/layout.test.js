@@ -12,6 +12,7 @@ const {
   commentLayout,
   connectorGeometry,
   expandRect,
+  layoutViewportWidth,
   manualPositionMatchesViewport,
   responsivePosition,
   setConnectorVisible,
@@ -73,6 +74,21 @@ test("manual positions only apply at the viewport width where they were saved", 
   assert.equal(manualPositionMatchesViewport({ left: 1, top: 2 }, 1440), false);
 });
 
+test("layout viewport width ignores overflow-expanded and fractional measurements", () => {
+  const documentElement = { clientWidth: 807 };
+  const view = {
+    innerWidth: 820,
+    visualViewport: { width: 795.75 },
+    document: { documentElement },
+  };
+
+  assert.equal(layoutViewportWidth(view), 795);
+  view.innerWidth = 795;
+  documentElement.clientWidth = 795;
+  assert.equal(layoutViewportWidth(view), 795);
+  assert.equal(layoutViewportWidth({ innerWidth: 1024 }), 1024);
+});
+
 test("responsive positions use exactly one matching device range", () => {
   const position = {
     x: 240,
@@ -98,6 +114,25 @@ test("responsive positions use exactly one matching device range", () => {
   );
 });
 
+test("responsive positions can follow the same media-query state as page CSS", () => {
+  const position = {
+    x: 240,
+    y: 40,
+    breakpoints: [
+      { maxWidth: 800, x: 120, y: 30 },
+      { minWidth: 801, x: 50, y: 40 },
+    ],
+  };
+  const mobileMedia = (query) => ({
+    matches: query.includes("(max-width: 800px)"),
+  });
+
+  assert.deepEqual(
+    responsivePosition(position, 900, mobileMedia),
+    { x: 120, y: 30 },
+  );
+});
+
 test("responsive positions remain stable across repeated resolutions", () => {
   const position = {
     x: 10,
@@ -111,6 +146,26 @@ test("responsive positions remain stable across repeated resolutions", () => {
   assert.deepEqual(responsivePosition(position, 700), { x: 30, y: 20 });
   assert.deepEqual(responsivePosition(position, 700), { x: 30, y: 20 });
   assert.deepEqual(responsivePosition(position, 500), { x: 10, y: 20 });
+});
+
+test("responsive positions can hide and reveal an annotation by device range", () => {
+  const position = {
+    x: 10,
+    y: 20,
+    breakpoints: [
+      { maxWidth: 800, x: 30, y: 40, show: false },
+      { minWidth: 801, x: 50, y: 60, show: true },
+    ],
+  };
+
+  assert.deepEqual(
+    responsivePosition(position, 700),
+    { x: 30, y: 40, show: false },
+  );
+  assert.deepEqual(
+    responsivePosition(position, 1024),
+    { x: 50, y: 60, show: true },
+  );
 });
 
 test("connector visibility toggles an SVG-compatible hidden attribute", () => {

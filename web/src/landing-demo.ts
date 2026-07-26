@@ -24,6 +24,7 @@ type AnnotationSeed = {
     pagePinned?: boolean;
     // Keep these ranges exclusive: the first matching entry supplies both axes.
     breakpoints?: {
+      show?: boolean;
       minWidth?: number;
       maxWidth?: number;
       x: number;
@@ -76,7 +77,10 @@ const seeds: AnnotationSeed[] = [
     content: "Like this!",
     position: {
       x: -300,
-      y: 10
+      y: 10,
+      breakpoints: [
+        { minWidth: 0, maxWidth: 800, x: -100, y: 40 }
+      ],
     },
   },
   {
@@ -88,8 +92,8 @@ const seeds: AnnotationSeed[] = [
       y: 40,
       x: 200,
       breakpoints: [
-        { maxWidth: 520, x: -80, y: -206 },
-        { minWidth: 521, maxWidth: 800, x: 40, y: 30 },
+        { minWidth: 0, maxWidth: 800, x: 105, y: -70 },
+        { minWidth: 801, maxWidth: 1260, x: 50, y: 40 }
       ],
     },
   },
@@ -103,8 +107,10 @@ const seeds: AnnotationSeed[] = [
       y: 35,
       actionSide: "left",
       breakpoints: [
-        { maxWidth: 520, x: -10, y: 40 },
-        { minWidth: 521, maxWidth: 800, x: -15, y: 48 },
+        { minWidth: 0, maxWidth: 800, x: 10, y: 0 },
+        { minWidth: 801, maxWidth: 1260, x: -20, y: 28 },
+        { minWidth: 1261, maxWidth: 1409, x: -20, y: 28 }
+
       ],
     },
   },
@@ -115,13 +121,12 @@ const seeds: AnnotationSeed[] = [
     selector: "#landing-demo-description",
     content: "Fix these typos",
     position: {
-      // Pull the note back over roughly the final quarter of the highlighted line.
       x: -120,
       y: 60,
       actionSide: "right",
       breakpoints: [
-        { maxWidth: 520, x: -40, y: 36 },
-        { minWidth: 521, maxWidth: 800, x: -60, y: 40 },
+        { minWidth: 0, maxWidth: 800, x: 40, y: 6 },
+        { minWidth: 801, maxWidth: 1024, x: -160, y: 60 }
       ],
     },
   },
@@ -132,11 +137,12 @@ const seeds: AnnotationSeed[] = [
     content: "Try it on this page",
     position: {
       y: -380,
-      actionSide: "left",
+      actionSide: "right",
       pagePinned: true,
       breakpoints: [
-        { maxWidth: 520, x: 30, y: 0 },
-        { minWidth: 521, maxWidth: 800, x: -40, y: -310 },
+        { minWidth: 0, maxWidth: 800, x: 30, y: 0, show: false },
+        { minWidth: 801, maxWidth: 1260, x: 100, y: -380 },
+        { minWidth: 1261, maxWidth: 1380, x: 100, y: -320 }
       ],
     },
   },
@@ -150,8 +156,9 @@ const seeds: AnnotationSeed[] = [
       x: -680,
       actionSide: "left",
       breakpoints: [
-        { maxWidth: 520, x: -60, y: 20 },
-        { minWidth: 521, maxWidth: 800, x: -300, y: -10 },
+        { minWidth: 0, maxWidth: 800, x: -60, y: 6 },
+        { minWidth: 801, maxWidth: 1260, x: -480, y: 40 },
+
       ],
     },
   },

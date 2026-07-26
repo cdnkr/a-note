@@ -85,7 +85,21 @@
     );
   }
 
-  function responsivePosition(position, viewportWidth) {
+  function layoutViewportWidth(view = globalThis) {
+    const candidates = [
+      view?.innerWidth,
+      view?.visualViewport?.width,
+      view?.document?.documentElement?.clientWidth,
+    ].filter((width) => Number.isFinite(width) && width > 0);
+    if (!candidates.length) return 0;
+
+    // Overflow can enlarge the layout viewport while the visible viewport stays
+    // put (notably in responsive device emulation). Use the narrowest real
+    // viewport measurement and normalize fractional zoom values for breakpoints.
+    return Math.floor(Math.min(...candidates));
+  }
+
+  function responsivePosition(position, viewportWidth, matchMedia) {
     if (!position) return null;
 
     const { breakpoints, ...resolved } = position;
@@ -93,6 +107,21 @@
 
     const breakpoint = breakpoints.find((candidate) => {
       if (!candidate) return false;
+      if (typeof matchMedia === "function") {
+        const conditions = [];
+        if (Number.isFinite(candidate.minWidth)) {
+          conditions.push(`(min-width: ${candidate.minWidth}px)`);
+        }
+        if (Number.isFinite(candidate.maxWidth)) {
+          conditions.push(`(max-width: ${candidate.maxWidth}px)`);
+        }
+        if (!conditions.length) return true;
+        try {
+          return Boolean(matchMedia(conditions.join(" and "))?.matches);
+        } catch (_error) {
+          // Fall back to the numeric viewport measurement below.
+        }
+      }
       const aboveMinimum = !Number.isFinite(candidate.minWidth)
         || viewportWidth >= candidate.minWidth;
       const belowMaximum = !Number.isFinite(candidate.maxWidth)
@@ -102,6 +131,7 @@
 
     if (Number.isFinite(breakpoint?.x)) resolved.x = breakpoint.x;
     if (Number.isFinite(breakpoint?.y)) resolved.y = breakpoint.y;
+    if (typeof breakpoint?.show === "boolean") resolved.show = breakpoint.show;
 
     return resolved;
   }
@@ -276,6 +306,7 @@
     commentLayout,
     connectorGeometry,
     expandRect,
+    layoutViewportWidth,
     manualPositionMatchesViewport,
     responsivePosition,
     setConnectorVisible,
