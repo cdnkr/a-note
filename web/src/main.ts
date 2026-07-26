@@ -2,26 +2,28 @@ import "./styles.css";
 import { CHROME_STORE_URL } from "./config";
 import { mountLandingDemo } from "./landing-demo";
 import {
+  arrowIcon,
+  brand,
   brandIconMarkup,
   updateBrandFavicon,
 } from "./brand";
+import {
+  PRIVACY_POLICY_PATH,
+  renderPrivacyPolicy,
+} from "./privacy-policy";
+import { escapeAttribute, setNoIndex } from "./utils";
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("App root not found");
 
 updateBrandFavicon();
-if (location.pathname.startsWith("/s/")) {
+const pathname = location.pathname.replace(/\/+$/, "") || "/";
+if (pathname === PRIVACY_POLICY_PATH) {
+  renderPrivacyPolicy(app);
+} else if (location.pathname.startsWith("/s/")) {
   renderRetiredSharePage(app);
 } else {
   renderLandingPage(app);
-}
-
-function brand(): string {
-  return `<a class="brand" href="/" aria-label="A-Note home">${brandIconMarkup("brand-mark")}<span>A-Note</span></a>`;
-}
-
-function arrowIcon(): string {
-  return `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"/></svg>`;
 }
 
 function renderLandingPage(root: HTMLElement): void {
@@ -31,6 +33,7 @@ function renderLandingPage(root: HTMLElement): void {
     <header class="site-header shell">
       ${brand()}
       <a class="button button-small" href="${escapeAttribute(CHROME_STORE_URL)}">Get the extension ${arrowIcon()}</a>
+      <a class="landing-privacy-link" href="${PRIVACY_POLICY_PATH}">Privacy</a>
     </header>
 
     <main>
@@ -95,18 +98,4 @@ function renderRetiredSharePage(root: HTMLElement): void {
       <a class="button" href="/">Back to A-Note</a>
     </main>
   `;
-}
-
-function setNoIndex(): void {
-  let robots = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
-  if (!robots) {
-    robots = document.createElement("meta");
-    robots.name = "robots";
-    document.head.append(robots);
-  }
-  robots.content = "noindex, nofollow";
-}
-
-function escapeAttribute(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

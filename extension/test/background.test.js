@@ -118,6 +118,80 @@ test("background restores and globally updates the toolbar colour", async () => 
   assert.equal(calls.fetches, 0);
 });
 
+test("an action click injects the packaged annotator before toggling a new tab", async () => {
+  const calls = {
+    injections: [],
+    messages: [],
+    badges: [],
+  };
+  let actionListener;
+  const context = vm.createContext({
+    importScripts() {},
+    chrome: {
+      action: {
+        onClicked: {
+          addListener(listener) {
+            actionListener = listener;
+          },
+        },
+        async setIcon() {},
+        async setBadgeBackgroundColor() {},
+        async setBadgeTextColor() {},
+        async setBadgeText(details) {
+          calls.badges.push(details);
+        },
+      },
+      scripting: {
+        async executeScript(details) {
+          calls.injections.push(details);
+        },
+      },
+      storage: {
+        local: {
+          async get() {
+            return {};
+          },
+        },
+        onChanged: { addListener() {} },
+      },
+      tabs: {
+        onUpdated: { addListener() {} },
+        async sendMessage(tabId, message) {
+          calls.messages.push({ tabId, message });
+          if (calls.messages.length === 1) throw new Error("No receiver");
+          return { active: true };
+        },
+      },
+      runtime: {
+        onMessage: { addListener() {} },
+      },
+      globalThis: undefined,
+    },
+    Date,
+    Error,
+    Map,
+    Object,
+    Promise,
+    String,
+    URL,
+  });
+  context.globalThis = context;
+
+  vm.runInContext(brandSource, context);
+  vm.runInContext(backgroundSource, context);
+  await settle();
+  await actionListener({ id: 12, url: "https://example.com/page" });
+
+  assert.equal(calls.injections.length, 1);
+  assert.equal(calls.injections[0].target.tabId, 12);
+  assert.deepEqual(
+    Array.from(calls.injections[0].files),
+    ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
+  );
+  assert.equal(calls.messages.length, 2);
+  assert.equal(calls.badges.at(-1).text, "ON");
+});
+
 function settle() {
   return new Promise((resolve) => setImmediate(resolve));
 }

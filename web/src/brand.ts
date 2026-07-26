@@ -26,3 +26,11 @@ export function updateBrandFavicon(colorId?: string, targetDocument = document):
   favicon.type = "image/svg+xml";
   favicon.href = brandIconUrl(colorId);
 }
+
+export function brand(): string {
+  return `<a class="brand" href="/" aria-label="A-Note home">${brandIconMarkup("brand-mark")}<span>A-Note</span></a>`;
+}
+
+export function arrowIcon(): string {
+  return `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"/></svg>`;
+}

@@ -12,11 +12,9 @@ const distRoot = path.join(extensionRoot, "dist");
 const manifest = JSON.parse(fs.readFileSync(path.join(publicRoot, "manifest.json"), "utf8"));
 const palette = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "web", "brand", "palette.json"), "utf8"));
 
-test("brand, layout, and widget helpers load before the content adapter", () => {
-  assert.deepEqual(
-    manifest.content_scripts[0].js,
-    ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
-  );
+test("the packaged annotator is injected in dependency order without persistent host access", () => {
+  assert.deepEqual(manifest.permissions, ["storage", "activeTab", "scripting"]);
+  assert.equal("content_scripts" in manifest, false);
   const background = fs.readFileSync(path.join(sourceRoot, "background.js"), "utf8");
   assert.match(
     background,

@@ -12,6 +12,7 @@ A local-first Chrome extension for attaching short comments to webpage elements 
 
 ## How it works
 
+- A-Note has no persistent host permission. Clicking its extension icon grants temporary access to that active tab and injects only the annotation scripts packaged with the extension.
 - Every page is keyed in `chrome.storage.local` by its full URL, including ordinary query parameters and the hash.
 - A saved annotation contains either an element XPath or an exact text-range target, short text content (up to 240 characters), an ID, and its creation time. Selecting a target creates and persists an inline annotation immediately in edit mode; it may remain empty for outline- or highlight-only screenshots. Clicking saved comment text edits it, and each input immediately updates `chrome.storage.local`.
 - New annotations use a ranked XPath candidate strategy: stable unique IDs and test attributes first, then semantic tags, label/text anchors, nearby stable ancestors or siblings, token-safe classes, and finally an absolute path. Every candidate must resolve uniquely to the selected element before it can be stored. SVG steps are namespace-safe, while elements inside open Shadow DOM use a compound host XPath plus deterministic paths within each shadow root.

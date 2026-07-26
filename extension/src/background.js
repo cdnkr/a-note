@@ -21,13 +21,12 @@ chrome.action.onClicked.addListener(async (tab) => {
     const response = await chrome.tabs.sendMessage(tab.id, { type: "ANOTE_TOGGLE_ACTIVE" });
     await updateBadge(tab.id, response?.active);
   } catch (_error) {
-      // Pages that were already open when the extension was installed need a
-      // one-time injection before they can receive the action click.
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
-        });
+    // Request-scoped activeTab access lets this click inject the packaged UI.
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["brand.js", "lib.js", "layout.js", "widget.js", "content.js"],
+      });
       const response = await chrome.tabs.sendMessage(tab.id, { type: "ANOTE_TOGGLE_ACTIVE" });
       await updateBadge(tab.id, response?.active);
     } catch (_injectionError) {

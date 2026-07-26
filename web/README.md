@@ -1,7 +1,8 @@
 # A-Note web
 
-The static A-Note landing page. Historical `/s/*` screenshot URLs render a
-no-indexed retirement notice instead of fetching or displaying uploaded data.
+The static A-Note landing page. `/privacy-policy` renders the extension's public
+privacy policy. Historical `/s/*` screenshot URLs render a no-indexed retirement
+notice instead of fetching or displaying uploaded data.
 
 ## Local development
 
