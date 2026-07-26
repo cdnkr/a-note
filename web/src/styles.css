@@ -560,21 +560,6 @@ svg {
   line-height: 1.65;
 }
 
-.landing-privacy-link {
-  position: absolute;
-  right: max(24px, calc((100% - 1160px) / 2));
-  bottom: 28px;
-  color: rgba(17, 26, 46, .64);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.landing-privacy-link:hover {
-  color: var(--navy);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
 #app.privacy-page {
   min-height: 100dvh;
   overflow: visible;

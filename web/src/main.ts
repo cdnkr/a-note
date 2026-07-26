@@ -33,7 +33,6 @@ function renderLandingPage(root: HTMLElement): void {
     <header class="site-header shell">
       ${brand()}
       <a class="button button-small" href="${escapeAttribute(CHROME_STORE_URL)}">Get the extension ${arrowIcon()}</a>
-      <a class="landing-privacy-link" href="${PRIVACY_POLICY_PATH}">Privacy</a>
     </header>
 
     <main>
